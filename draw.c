@@ -63,6 +63,32 @@ draw_char_width(draw_context c, font_t f, char ch)
 	return ext.xOff;
 }
 
+unsigned int
+draw_width(draw_context c)
+{
+	union {
+		Window w;
+		unsigned int i;
+	} junk;
+	unsigned int w;
+
+	XGetGeometry(c.disp, c.win, &junk.w, &junk.i, &junk.i, &w, &junk.i, &junk.i, &junk.i);
+	return w;
+}
+
+unsigned int
+draw_height(draw_context c)
+{
+	union {
+		Window w;
+		unsigned int i;
+	} junk;
+	unsigned int h;
+
+	XGetGeometry(c.disp, c.win, &junk.w, &junk.i, &junk.i, &junk.i, &h, &junk.i, &junk.i);
+	return h;
+}
+
 int
 draw_string_width(draw_context c, font_t f, char* s)
 {

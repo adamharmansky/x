@@ -4,6 +4,8 @@
 #include "draw.h"
 #include <pthread.h>
 
+extern int toolkit_running;
+
 
 typedef struct {
 	/* the linear coefficient is multiplied by the width of the window
@@ -88,6 +90,9 @@ typedef struct {
 	char scrollable;
 	int scroll;
 	int max_scroll;
+	int cursor_x;
+	int cursor_y;
+	int cursor_position;
 } TextField;
 
 typedef struct {

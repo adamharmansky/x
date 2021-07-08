@@ -2,7 +2,7 @@
 
 Button b =    {.position = {{-60,-60},{1,1}}, .size = {{50,50},{0,0}}, .text = " "};
 Button c =    {.position = {{10,10},{0,0}}, .size = {{50,50},{0,0}}, .text = " "};
-TextField t = {.position = {{10,10},{0,0}}, .size = {{-20,-80},{1,1}}, .text = "no way, it works!\na\na\na\na\na\na\na\na\na\na\na\na\na\na\na\na\na\na\na\na\na\nmore windows!\na\na\na\na\na\na\nyes yes yes\na", .scrollable = 1};
+TextField t = {.position = {{10,10},{0,0}}, .size = {{-20,-80},{1,1}}, .text = "type some text", .scrollable = 1, .input = 1};
 
 int main()
 {
@@ -11,5 +11,5 @@ int main()
 	toolkit_show_button(tw, &b);
 	toolkit_show_text_field(tw, &t);
 	toolkit_show_button(tx, &c);
-	pause();
+	while(toolkit_running) sleep(1);
 }

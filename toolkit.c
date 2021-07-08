@@ -7,6 +7,8 @@
 
 static TWindow* _i_am_too_lazy_to_do_arguments_right;
 
+int toolkit_running = 0;
+
 const XRectangle RECTS_RESET[] = {
 	(XRectangle){.x = 0, .y = 0, .width = ~0, .height = ~0}
 };
@@ -20,25 +22,28 @@ refresh_text_field(TWindow* tw,TextField* t)
 	int y;
 	int i;
 	int x_limit;
+	char* text;
 
 	t->_text_length = draw_string_width(tw->c,tw->font, t->text);
 
+	
 	if(t->scrollable) {
+		text = (t->input && *t->typed_text) ? t->typed_text : t->text;
 		x = 3;
 		y = 3 + tw->font.xftfont->ascent;
 		x_limit = t->w - 3 - t->scrollable*16;
 
-		for(i = 0; t->text[i]; i++) {
-			if(t->text[i] == '\n' || x >= x_limit) {
+		for(i = 0; text[i]; i++) {
+			if(text[i] == '\n' || x >= x_limit) {
 				x = 3;
 				y += tw->font.xftfont->height;
-			} else if(t->text[i] == '\t') {
+			} else if(text[i] == '\t') {
 				x += 24;
 			} else {
-				x += draw_char_width(tw->c,tw->font, t->text[i]);
+				x += draw_char_width(tw->c,tw->font, text[i]);
 			}
 		}
-		t->max_scroll = y-t->h/2;
+		t->max_scroll = y-t->h;
 	}
 	if(t->scroll < 0) t->scroll = 0;
 	if(t->scroll > t->max_scroll) t->scroll = t->max_scroll;
@@ -331,6 +336,8 @@ _toolkit_thread_func(void* args)
 		KeyPressMask |
 		Button1MotionMask |
 		KeyReleaseMask);
+	Atom stop_atom = XInternAtom(tw->c.disp, "WM_DELETE_WINDOW", False);
+	XSetWMProtocols(tw->c.disp, tw->c.win, &stop_atom, 1);
 	tw->width  = tw->default_width;
 	tw->height = tw->default_height;
 
@@ -345,9 +352,9 @@ _toolkit_thread_func(void* args)
 	tw->selected_bg         = create_color(tw->c,0x76,0x9e,0xc5);
 
 	tw->font = load_font(tw->c,"Sans-serif:size=11");
-
 	tw->widgets = malloc(tw->widget_count=0);
 
+	toolkit_running++;
 	tw->ready = 1;
 
 
@@ -364,11 +371,10 @@ _toolkit_thread_func(void* args)
 		}
 		if(e.type == Expose) {
 			if(e.xexpose.count == 0) {
-				draw_resize(&tw->c,e.xexpose.width, e.xexpose.height);
+				draw_resize(&tw->c,draw_width(tw->c), draw_height(tw->c));
 				recalculate_size(tw);
 				full_redraw(tw);
 			}
-
 		} else if(e.type == MotionNotify) {
 			tw->pointer_x = e.xmotion.x;
 			tw->pointer_y = e.xmotion.y;
@@ -406,7 +412,7 @@ _toolkit_thread_func(void* args)
 				 * if we click on the same field, it will
 				 * get selected later in this cycle */
 				if(tw->widgets[i].type == TEXT_FIELD){
-					if(tw->widgets[i].widget.t->selected) {
+					if(tw->widgets[i].widget.t->selected && e.xbutton.button == 1) {
 						tw->widgets[i].widget.t->selected = 0;
 						draw_text_field(tw,*tw->widgets[i].widget.t);
 					}
@@ -519,14 +525,23 @@ _toolkit_thread_func(void* args)
 								tw->widgets[i].widget.t->typed_text[l] = 0;
 								tw->widgets[i].widget.t->typed_text[l-1] = *s;
 							}
+							refresh_text_field(tw, tw->widgets[i].widget.t);
+							if(tw->widgets[i].widget.t->max_scroll > 0) {
+								tw->widgets[i].widget.t->scroll = tw->widgets[i].widget.t->max_scroll;
+							}
 							call_users_function(tw,tw->widgets[i].widget.t->on_content_changed);
 							draw_text_field(tw,*tw->widgets[i].widget.t);
 						}
 					}
 				}
 			}
+		} else if(e.type == ClientMessage) {
+			if(e.xclient.data.l[0] == stop_atom) break;
 		}
 	}
+	XDestroyWindow(tw->c.disp, tw->c.win);
+	XCloseDisplay(tw->c.disp);
+	toolkit_running--;
 }
 
 /* starts a separate thread for all the widget logic */
