@@ -2,9 +2,8 @@
 #define TOOLKIT_H
 
 #include "draw.h"
+#include <pthread.h>
 
-extern color_t toolkit_bg;
-extern font_t  toolkit_font;
 
 typedef struct {
 	/* the linear coefficient is multiplied by the width of the window
@@ -115,6 +114,7 @@ typedef struct {
 	char expand_up;
 } ComboBox;
 
+/* do not set theese up yourself ↓ */
 typedef struct {
 	enum {
 		BUTTON,
@@ -131,25 +131,45 @@ typedef struct {
 	} widget;
 } _toolkit_widget;
 
-extern int
+
+typedef struct {
+	int width, height;
+	int default_width, default_height;
+	char* default_name;
+	pthread_t thread;
+	draw_context c;
+	int pointer_x, pointer_y, pointer_down;
+	char ready;
+	char has_to_redraw;
+	font_t font;
+	color_t bg;
+	color_t text_color;
+	color_t disabled_text_color;
+	color_t shade_dark;
+	color_t shade_light;
+	color_t outline;
+	color_t outline_corner;
+	color_t text_field_bg;
+	color_t selected_bg;
+	_toolkit_widget* widgets;
+	int widget_count;
+} TWindow;
+
+extern TWindow*
 toolkit_init(int,int,char*);
-
 extern void
-toolkit_show_button(Button*);
+toolkit_show_button(TWindow*, Button*);
 extern void
-toolkit_show_label(Label*);
+toolkit_show_label(TWindow*,Label*);
 extern void
-toolkit_show_text_field(TextField*);
+toolkit_show_text_field(TWindow*,TextField*);
 extern void
-toolkit_show_combo_box(ComboBox* c);
-
+toolkit_show_combo_box(TWindow*,ComboBox* c);
 extern void
-toolkit_full_redraw();
+toolkit_full_redraw(TWindow*);
 extern void
-toolkit_redraw();
-
+toolkit_redraw(TWindow*);
 extern int
-toolkit_remove_widget(void* widget);
+toolkit_remove_widget(TWindow*,void*);
 
-extern int toolkit_width, toolkit_height;
 #endif

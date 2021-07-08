@@ -34,5 +34,5 @@ extern int draw_char_width(draw_context,font_t f, char c);
 extern int draw_string_width(draw_context,font_t f, char* c);
 extern void draw_flush_all(draw_context);
 extern void draw_flush(draw_context,int x, int y, int w, int h);
-extern void draw_resize(draw_context,int w, int h);
+extern void draw_resize(draw_context*,int w, int h);
 #endif

@@ -5,61 +5,37 @@
 
 #define SCROLL_AMOUNT 20
 
+static TWindow* _i_am_too_lazy_to_do_arguments_right;
+
 const XRectangle RECTS_RESET[] = {
 	(XRectangle){.x = 0, .y = 0, .width = ~0, .height = ~0}
 };
 
-static int _toolkit_default_width, _toolkit_default_height;
-static char* _toolkit_default_name;
-static pthread_t _toolkit_thread;
-static draw_context c;
-
-static int pointer_x, pointer_y, pointer_down;
-
-int toolkit_width, toolkit_height;
-
-static char ________toolkit_ready = 0;
-static char _toolkit_has_to_redraw = 0;
-
 static void recalculate_size();
 
-color_t toolkit_bg;
-color_t toolkit_text_color;
-color_t toolkit_disabled_text_color;
-font_t  toolkit_font;
-color_t toolkit_shade_dark;
-color_t toolkit_shade_light;
-color_t toolkit_outline;
-color_t toolkit_outline_corner;
-color_t toolkit_text_field_bg;
-color_t toolkit_selected_bg;
-
-static _toolkit_widget* widgets;
-static int widget_count = 0;
-
 static void
-refresh_text_field(TextField* t)
+refresh_text_field(TWindow* tw,TextField* t)
 {
 	int x;
 	int y;
 	int i;
 	int x_limit;
 
-	t->_text_length = draw_string_width(c,toolkit_font, t->text);
+	t->_text_length = draw_string_width(tw->c,tw->font, t->text);
 
 	if(t->scrollable) {
 		x = 3;
-		y = 3 + toolkit_font.xftfont->ascent;
+		y = 3 + tw->font.xftfont->ascent;
 		x_limit = t->w - 3 - t->scrollable*16;
 
 		for(i = 0; t->text[i]; i++) {
 			if(t->text[i] == '\n' || x >= x_limit) {
 				x = 3;
-				y += toolkit_font.xftfont->height;
+				y += tw->font.xftfont->height;
 			} else if(t->text[i] == '\t') {
 				x += 24;
 			} else {
-				x += draw_char_width(c,toolkit_font, t->text[i]);
+				x += draw_char_width(tw->c,tw->font, t->text[i]);
 			}
 		}
 		t->max_scroll = y-t->h/2;
@@ -69,76 +45,75 @@ refresh_text_field(TextField* t)
 }
 
 static void
-draw_button(Button b)
+draw_button(TWindow* tw,Button b)
 {
 	int i;
 	int xx, yy;
 
 	if(b.toggle) {
-		draw_rectangle(c,b.x, b.y, b.w, b.h, toolkit_bg);
+		draw_rectangle(tw->c,b.x, b.y, b.w, b.h, tw->bg);
 		xx = b.x + 9;
 		yy = b.y + b.h/2;
-		draw_text(c,b.x + 18, b.y + b.h/2 + toolkit_font.xftfont->ascent/2-2, toolkit_font, b.text, toolkit_text_color);
-		draw_rectangle(c,xx-6,yy-6,13,13,toolkit_outline);
-		draw_rectangle(c,xx-5,yy-5,11,11,toolkit_text_field_bg);
+		draw_text(tw->c,b.x + 18, b.y + b.h/2 + tw->font.xftfont->ascent/2-2, tw->font, b.text, tw->text_color);
+		draw_rectangle(tw->c,xx-6,yy-6,13,13,tw->outline);
+		draw_rectangle(tw->c,xx-5,yy-5,11,11,tw->text_field_bg);
 		if(b.pressed) {
 			for(i = 0; i < 6; i++) {
-				draw_rectangle(c,xx-i,yy-i,1,1,toolkit_outline);
-				draw_rectangle(c,xx+i,yy-i,1,1,toolkit_outline);
-				draw_rectangle(c,xx-i,yy+i,1,1,toolkit_outline);
-				draw_rectangle(c,xx+i,yy+i,1,1,toolkit_outline);
+				draw_rectangle(tw->c,xx-i,yy-i,1,1,tw->outline);
+				draw_rectangle(tw->c,xx+i,yy-i,1,1,tw->outline);
+				draw_rectangle(tw->c,xx-i,yy+i,1,1,tw->outline);
+				draw_rectangle(tw->c,xx+i,yy+i,1,1,tw->outline);
 			}
 		}
 	} else {
-		draw_rectangle(c,b.x-1, b.y-1, b.w+2, b.h+2, toolkit_outline);
+		draw_rectangle(tw->c,b.x-1, b.y-1, b.w+2, b.h+2, tw->outline);
 
-		draw_rectangle(c,b.x-1  , b.y-1,   1, 1, toolkit_outline_corner);
-		draw_rectangle(c,b.x+b.w, b.y-1,   1, 1, toolkit_outline_corner);
-		draw_rectangle(c,b.x-1  , b.y+b.h, 1, 1, toolkit_outline_corner);
-		draw_rectangle(c,b.x+b.w, b.y+b.h, 1, 1, toolkit_outline_corner);
+		draw_rectangle(tw->c,b.x-1  , b.y-1,   1, 1, tw->outline_corner);
+		draw_rectangle(tw->c,b.x+b.w, b.y-1,   1, 1, tw->outline_corner);
+		draw_rectangle(tw->c,b.x-1  , b.y+b.h, 1, 1, tw->outline_corner);
+		draw_rectangle(tw->c,b.x+b.w, b.y+b.h, 1, 1, tw->outline_corner);
 		if(b.pressed) {
-			draw_rectangle(c,b.x, b.y, b.w, b.h, toolkit_shade_dark);
-			draw_rectangle(c,b.x+2, b.y+2, b.w-2, b.h-2, toolkit_shade_light);
-			draw_rectangle(c,b.x+2, b.y+2, b.w-3, b.h-3, toolkit_bg);
+			draw_rectangle(tw->c,b.x, b.y, b.w, b.h, tw->shade_dark);
+			draw_rectangle(tw->c,b.x+2, b.y+2, b.w-2, b.h-2, tw->shade_light);
+			draw_rectangle(tw->c,b.x+2, b.y+2, b.w-3, b.h-3, tw->bg);
 		} else {
-			draw_rectangle(c,b.x, b.y, b.w, b.h, toolkit_shade_light);
-			draw_rectangle(c,b.x+1, b.y+1, b.w-1, b.h-1, toolkit_shade_dark);
-			draw_rectangle(c,b.x+1, b.y+1, b.w-3, b.h-3, toolkit_bg);
+			draw_rectangle(tw->c,b.x, b.y, b.w, b.h, tw->shade_light);
+			draw_rectangle(tw->c,b.x+1, b.y+1, b.w-1, b.h-1, tw->shade_dark);
+			draw_rectangle(tw->c,b.x+1, b.y+1, b.w-3, b.h-3, tw->bg);
 		}
-		draw_text(c,b.x+b.w/2-b._text_length/2 + b.pressed, b.y + b.h/2 + toolkit_font.xftfont->ascent/2-3 + b.pressed, toolkit_font, b.text, toolkit_text_color);
+		draw_text(tw->c,b.x+b.w/2-b._text_length/2 + b.pressed, b.y + b.h/2 + tw->font.xftfont->ascent/2-3 + b.pressed, tw->font, b.text, tw->text_color);
 	}
-	draw_flush(c,b.x-1, b.y-1, b.w+2, b.h+2);
+	draw_flush(tw->c,b.x-1, b.y-1, b.w+2, b.h+2);
 }
 
 static void
-draw_label(Label l)
+draw_label(TWindow* tw,Label l)
 {
-	int x = 3, y = toolkit_font.xftfont->ascent;
+	int x = 3, y = tw->font.xftfont->ascent;
 	int i;
-	draw_rectangle(c,l.x, l.y, l.w, l.h, toolkit_bg);
-	//draw_text(c,l.x+l.w/2-l._text_length/2, l.y + l.h/2 + toolkit_font.xftfont->ascent/2-3, toolkit_font, l.text, toolkit_text_color);
+	draw_rectangle(tw->c,l.x, l.y, l.w, l.h, tw->bg);
 	for(i = 0; l.text[i]; i++) {
 		if(x >= l.w - 5) {
 			x = 3;
-			y += toolkit_font.xftfont->height;
+			y += tw->font.xftfont->height;
 			if(y>=l.h) break;
 		}
 		if(l.text[i] == '\n') {
 			x = 3;
-			y += toolkit_font.xftfont->height;
+			y += tw->font.xftfont->height;
 			if(y>=l.h) break;
 		} else if(l.text[i] == '\t') {
 			x += 24;
 		} else {
-			draw_char(c,x+ l.x, y + l.y, toolkit_font, l.text[i], toolkit_text_color);
-			x += draw_char_width(c,toolkit_font, l.text[i]);
+			draw_char(tw->c,x+ l.x, y + l.y, tw->font, l.text[i], tw->text_color);
+			x += draw_char_width(tw->c,tw->font, l.text[i]);
 		}
 	}
-	draw_flush(c,l.x, l.y, l.w, l.h);
+	draw_flush(tw->c,l.x, l.y, l.w, l.h);
 }
 
 static void
-draw_text_field(TextField b)
+draw_text_field(TWindow* tw,TextField b)
 {
 	int x;
 	int y;
@@ -149,85 +124,85 @@ draw_text_field(TextField b)
 	int y_limit_high;
 	int scrollbar_y;
 	int s1 = b.w - b.scrollable*16;
-	color_t color = toolkit_text_color;
+	color_t color = tw->text_color;
 	XRectangle recs[] = {
 		(XRectangle){.x = b.x, .y = b.y, .width = b.w, .height = b.h}
 	};
 
 	/* draw the frame and the background */
-	draw_rectangle(c,b.x-1, b.y-1, b.w+2, 1, toolkit_outline);
-	draw_rectangle(c,b.x-1, b.y-1, 1, b.h+2, toolkit_outline);
-	draw_rectangle(c,b.x+b.w, b.y-1, 1, b.h+2, toolkit_outline);
-	draw_rectangle(c,b.x-1, b.y+b.h, b.w+2, 1, toolkit_outline);
+	draw_rectangle(tw->c,b.x-1, b.y-1, b.w+2, 1, tw->outline);
+	draw_rectangle(tw->c,b.x-1, b.y-1, 1, b.h+2, tw->outline);
+	draw_rectangle(tw->c,b.x+b.w, b.y-1, 1, b.h+2, tw->outline);
+	draw_rectangle(tw->c,b.x-1, b.y+b.h, b.w+2, 1, tw->outline);
 
-	draw_rectangle(c,b.x-1  , b.y-1,   1, 1, toolkit_outline_corner);
-	draw_rectangle(c,b.x+b.w, b.y-1,   1, 1, toolkit_outline_corner);
-	draw_rectangle(c,b.x-1  , b.y+b.h, 1, 1, toolkit_outline_corner);
-	draw_rectangle(c,b.x+b.w, b.y+b.h, 1, 1, toolkit_outline_corner);
-	//draw_rectangle(c,b.x, b.y, b.w - b.scrollable*16, b.h, toolkit_text_field_bg);
+	draw_rectangle(tw->c,b.x-1  , b.y-1,   1, 1, tw->outline_corner);
+	draw_rectangle(tw->c,b.x+b.w, b.y-1,   1, 1, tw->outline_corner);
+	draw_rectangle(tw->c,b.x-1  , b.y+b.h, 1, 1, tw->outline_corner);
+	draw_rectangle(tw->c,b.x+b.w, b.y+b.h, 1, 1, tw->outline_corner);
+	//draw_rectangle(tw->c,b.x, b.y, b.w - b.scrollable*16, b.h, tw->text_field_bg);
 
 	x = 3;
-	y = toolkit_font.xftfont->ascent - b.scroll;
-	x_limit = b.w - 3 - b.scrollable*16 - draw_char_width(c,toolkit_font, 'n');
-	y_limit_low = -toolkit_font.xftfont->ascent;
-	y_limit_high = b.h+toolkit_font.xftfont->descent;
+	y = tw->font.xftfont->ascent - b.scroll;
+	x_limit = b.w - 3 - b.scrollable*16 - draw_char_width(tw->c,tw->font, 'n');
+	y_limit_low = -tw->font.xftfont->ascent;
+	y_limit_high = b.h+tw->font.xftfont->descent;
 
 	/* draw the text */
 
 	if(b.input) {
 		if(b.selected || *b.typed_text) text = b.typed_text;
-		else{ text = b.text; color = toolkit_disabled_text_color;}
+		else{ text = b.text; color = tw->disabled_text_color;}
 	} else text = b.text;
 
-	XftDrawSetClipRectangles(c.draw, 0, 0, recs, 1);
-	draw_rectangle(c,b.x, b.y, b.w, b.h, toolkit_text_field_bg);
+	XftDrawSetClipRectangles(tw->c.draw, 0, 0, recs, 1);
+	draw_rectangle(tw->c,b.x, b.y, b.w, b.h, tw->text_field_bg);
 	for(i = 0; text[i] && y<y_limit_low; i++) {
 		if(x >= x_limit) {
 			x = 3;
-			y += toolkit_font.xftfont->height;
+			y += tw->font.xftfont->height;
 		}
 		if(text[i] == '\n') {
 			x = 3;
-			y += toolkit_font.xftfont->height;
+			y += tw->font.xftfont->height;
 		} else if(text[i] == '\t') x += 24;
-		else x += draw_char_width(c,toolkit_font, text[i]);
+		else x += draw_char_width(tw->c,tw->font, text[i]);
 	}
 	for(; text[i]; i++) {
 		if(x >= x_limit) {
 			x = 3;
-			y += toolkit_font.xftfont->height;
+			y += tw->font.xftfont->height;
 			if(y>=y_limit_high) break;
 		}
 		if(text[i] == '\n') {
 			x = 3;
-			y += toolkit_font.xftfont->height;
+			y += tw->font.xftfont->height;
 			if(y>=y_limit_high) break;
 		} else if(text[i] == '\t') {
 			x += 24;
 		} else {
-			draw_char(c,x+ b.x, y + b.y, toolkit_font, text[i], color);
-			x += draw_char_width(c,toolkit_font, text[i]);
+			draw_char(tw->c,x+ b.x, y + b.y, tw->font, text[i], color);
+			x += draw_char_width(tw->c,tw->font, text[i]);
 		}
 	}
 
-	if(b.input && b.selected)draw_rectangle(c,x+b.x, y+b.y-toolkit_font.xftfont->ascent, 2,toolkit_font.xftfont->ascent,toolkit_text_color);
+	if(b.input && b.selected)draw_rectangle(tw->c,x+b.x, y+b.y-tw->font.xftfont->ascent, 2,tw->font.xftfont->ascent,tw->text_color);
 
 	/* draw the scrollbar */
 	if(b.scrollable) {
 		scrollbar_y = b.y+b.scroll*(b.h-50)/(b.max_scroll+1);
-		draw_rectangle(c,b.x+b.w-16, b.y-1, 1, b.h+2,  toolkit_outline);
-		draw_rectangle(c,b.x+b.w-15, b.y, 15, b.h,  toolkit_bg);
-		draw_rectangle(c,b.x+b.w-15, scrollbar_y-1, 15, 52,  toolkit_outline);
-		draw_rectangle(c,b.x+b.w-15, scrollbar_y, 15, 50,  toolkit_shade_light);
-		draw_rectangle(c,b.x+b.w-14, scrollbar_y+1, 14, 49,  toolkit_shade_dark);
-		draw_rectangle(c,b.x+b.w-14, scrollbar_y+1, 12, 47,  toolkit_bg);
+		draw_rectangle(tw->c,b.x+b.w-16, b.y-1, 1, b.h+2,  tw->outline);
+		draw_rectangle(tw->c,b.x+b.w-15, b.y, 15, b.h,  tw->bg);
+		draw_rectangle(tw->c,b.x+b.w-15, scrollbar_y-1, 15, 52,  tw->outline);
+		draw_rectangle(tw->c,b.x+b.w-15, scrollbar_y, 15, 50,  tw->shade_light);
+		draw_rectangle(tw->c,b.x+b.w-14, scrollbar_y+1, 14, 49,  tw->shade_dark);
+		draw_rectangle(tw->c,b.x+b.w-14, scrollbar_y+1, 12, 47,  tw->bg);
 	}
-	XftDrawSetClipRectangles(c.draw, 0, 0, RECTS_RESET, 1);
-	draw_flush(c,b.x-1, b.y-1, b.w+2, b.h+2);
+	XftDrawSetClipRectangles(tw->c.draw, 0, 0, RECTS_RESET, 1);
+	draw_flush(tw->c,b.x-1, b.y-1, b.w+2, b.h+2);
 }
 
 static void
-draw_combo_box(ComboBox comb)
+draw_combo_box(TWindow* tw,ComboBox comb)
 {
 	int i, count;
 	int xx, yy;
@@ -236,101 +211,101 @@ draw_combo_box(ComboBox comb)
 	yy = comb.y + comb.h/2;
 
 	/* draw the button for the combo box */
-	draw_rectangle(c,comb.x-1, comb.y-1, comb.w+2, comb.h+2, toolkit_outline);
-	draw_rectangle(c,comb.x-1  , comb.y-1,   1, 1, toolkit_outline_corner);
-	draw_rectangle(c,comb.x+comb.w, comb.y-1,   1, 1, toolkit_outline_corner);
-	draw_rectangle(c,comb.x-1  , comb.y+comb.h, 1, 1, toolkit_outline_corner);
-	draw_rectangle(c,comb.x+comb.w, comb.y+c.h, 1, 1, toolkit_outline_corner);
+	draw_rectangle(tw->c,comb.x-1, comb.y-1, comb.w+2, comb.h+2, tw->outline);
+	draw_rectangle(tw->c,comb.x-1  , comb.y-1,   1, 1, tw->outline_corner);
+	draw_rectangle(tw->c,comb.x+comb.w, comb.y-1,   1, 1, tw->outline_corner);
+	draw_rectangle(tw->c,comb.x-1  , comb.y+comb.h, 1, 1, tw->outline_corner);
+	draw_rectangle(tw->c,comb.x+comb.w, comb.y+tw->c.h, 1, 1, tw->outline_corner);
 
 	if(comb.open) {
-		draw_rectangle(c,comb.x, comb.y, comb.w, comb.h, toolkit_shade_dark);
-		draw_rectangle(c,comb.x+2, comb.y+2, comb.w-2, comb.h-2, toolkit_shade_light);
-		draw_rectangle(c,comb.x+2, comb.y+2, comb.w-3, comb.h-3, toolkit_bg);
+		draw_rectangle(tw->c,comb.x, comb.y, comb.w, comb.h, tw->shade_dark);
+		draw_rectangle(tw->c,comb.x+2, comb.y+2, comb.w-2, comb.h-2, tw->shade_light);
+		draw_rectangle(tw->c,comb.x+2, comb.y+2, comb.w-3, comb.h-3, tw->bg);
 	} else {
-		draw_rectangle(c,comb.x, comb.y, comb.w, comb.h, toolkit_shade_light);
-		draw_rectangle(c,comb.x+1, comb.y+1, comb.w-1, comb.h-1, toolkit_shade_dark);
-		draw_rectangle(c,comb.x+1, comb.y+1, comb.w-3, comb.h-3, toolkit_bg);
+		draw_rectangle(tw->c,comb.x, comb.y, comb.w, comb.h, tw->shade_light);
+		draw_rectangle(tw->c,comb.x+1, comb.y+1, comb.w-1, comb.h-1, tw->shade_dark);
+		draw_rectangle(tw->c,comb.x+1, comb.y+1, comb.w-3, comb.h-3, tw->bg);
 	}
-	if(comb.selected_option) draw_text(c,comb.x+7 + comb.open, comb.y + comb.h/2 + toolkit_font.xftfont->ascent/2-3, toolkit_font, comb.options[comb.selected_option-1], toolkit_text_color);
-	else draw_text(c,comb.x+7 + comb.open, comb.y + comb.h/2 + toolkit_font.xftfont->ascent/2-3, toolkit_font, comb.text, toolkit_text_color);
+	if(comb.selected_option) draw_text(tw->c,comb.x+7 + comb.open, comb.y + comb.h/2 + tw->font.xftfont->ascent/2-3, tw->font, comb.options[comb.selected_option-1], tw->text_color);
+	else draw_text(tw->c,comb.x+7 + comb.open, comb.y + comb.h/2 + tw->font.xftfont->ascent/2-3, tw->font, comb.text, tw->text_color);
 
-	draw_rectangle(c,xx-5, yy-4, 11, 1, toolkit_text_color);
-	draw_rectangle(c,xx-4, yy-3, 9,  1, toolkit_text_color);
-	draw_rectangle(c,xx-3, yy-2, 7,  1, toolkit_text_color);
-	draw_rectangle(c,xx-2, yy-1, 5,  1, toolkit_text_color);
-	draw_rectangle(c,xx-1, yy  , 3,  1, toolkit_text_color);
-	draw_rectangle(c,xx  , yy+1, 1,  1, toolkit_text_color);
+	draw_rectangle(tw->c,xx-5, yy-4, 11, 1, tw->text_color);
+	draw_rectangle(tw->c,xx-4, yy-3, 9,  1, tw->text_color);
+	draw_rectangle(tw->c,xx-3, yy-2, 7,  1, tw->text_color);
+	draw_rectangle(tw->c,xx-2, yy-1, 5,  1, tw->text_color);
+	draw_rectangle(tw->c,xx-1, yy  , 3,  1, tw->text_color);
+	draw_rectangle(tw->c,xx  , yy+1, 1,  1, tw->text_color);
 
 	count = 0;
 	/* draw the options */
 	if(comb.open) {
 		for(i = 0; comb.options[i]; i++) {
-			draw_rectangle(c,comb.x,   comb.y + (comb.expand_up ? -i*comb.h : i*comb.h)   , comb.w,   comb.h,   toolkit_text_field_bg);
+			draw_rectangle(tw->c,comb.x,   comb.y + (comb.expand_up ? -i*comb.h : i*comb.h)   , comb.w,   comb.h,   tw->text_field_bg);
 			if(i == comb.selected_option-1)
-				draw_rectangle(c,comb.x+1,   comb.y + (comb.expand_up ? -i*comb.h : i*comb.h)  +1 , comb.w-2,   comb.h-2,   toolkit_selected_bg);
-			draw_text(c,comb.x+3, comb.y + comb.h/2 + toolkit_font.xftfont->ascent/2-3 + (comb.expand_up ? -i*comb.h : i*comb.h), toolkit_font, comb.options[i], toolkit_text_color);
+				draw_rectangle(tw->c,comb.x+1,   comb.y + (comb.expand_up ? -i*comb.h : i*comb.h)  +1 , comb.w-2,   comb.h-2,   tw->selected_bg);
+			draw_text(tw->c,comb.x+3, comb.y + comb.h/2 + tw->font.xftfont->ascent/2-3 + (comb.expand_up ? -i*comb.h : i*comb.h), tw->font, comb.options[i], tw->text_color);
 			count++;
 		}
-		draw_rectangle(c,comb.x-1, comb.y-1 , comb.w+2, 1, toolkit_outline);
-		draw_rectangle(c,comb.x-1, comb.y+ (comb.h*(count)), comb.w+2, 1, toolkit_outline);
-		draw_rectangle(c,comb.x-1, comb.y-1 , 1, (comb.h*(count))+2, toolkit_outline);
-		draw_rectangle(c,comb.x+comb.w, comb.y-1 , 1, (comb.h*(count))+2, toolkit_outline);
+		draw_rectangle(tw->c,comb.x-1, comb.y-1 , comb.w+2, 1, tw->outline);
+		draw_rectangle(tw->c,comb.x-1, comb.y+ (comb.h*(count)), comb.w+2, 1, tw->outline);
+		draw_rectangle(tw->c,comb.x-1, comb.y-1 , 1, (comb.h*(count))+2, tw->outline);
+		draw_rectangle(tw->c,comb.x+comb.w, comb.y-1 , 1, (comb.h*(count))+2, tw->outline);
 	}
-	draw_flush(c,comb.x-1, comb.y-1, comb.w+2, comb.h+2 + comb.open * (comb.h*(count-1)));
-}
-
-void
-toolkit_redraw_widgets()
-{
-	int i;
-
-	for(i = 0; i < widget_count; i++) {
-		if     (widgets[i].type == BUTTON    ) draw_button    (*widgets[i].widget.b);
-		else if(widgets[i].type == TEXT_FIELD) draw_text_field(*widgets[i].widget.t);
-		else if(widgets[i].type == LABEL)      draw_label     (*widgets[i].widget.l);
-	}
-	/* draw combo boxes on top of fixed-size widgets */
-	for(i = 0; i < widget_count; i++) {
-		if(widgets[i].type == COMBO_BOX ) draw_combo_box (*widgets[i].widget.c);
-	}
-}
-
-void
-toolkit_full_redraw()
-{
-	draw_rectangle(c,0,0,c.w,c.h,toolkit_bg);
-
-	toolkit_redraw_widgets();
-	draw_flush_all(c);
+	draw_flush(tw->c,comb.x-1, comb.y-1, comb.w+2, comb.h+2 + comb.open * (comb.h*(count-1)));
 }
 
 static void
-call_users_function(void(*fun)())
+redraw_widgets(TWindow* tw)
+{
+	int i;
+
+	for(i = 0; i < tw->widget_count; i++) {
+		if     (tw->widgets[i].type == BUTTON    ) draw_button    (tw, *tw->widgets[i].widget.b);
+		else if(tw->widgets[i].type == TEXT_FIELD) draw_text_field(tw, *tw->widgets[i].widget.t);
+		else if(tw->widgets[i].type == LABEL)      draw_label     (tw, *tw->widgets[i].widget.l);
+	}
+	/* draw combo boxes on top of fixed-size tw->widgets */
+	for(i = 0; i < tw->widget_count; i++) {
+		if(tw->widgets[i].type == COMBO_BOX ) draw_combo_box(tw, *tw->widgets[i].widget.c);
+	}
+}
+
+static void
+full_redraw(TWindow* tw)
+{
+	draw_rectangle(tw->c,0,0,tw->c.w,tw->c.h,tw->bg);
+
+	redraw_widgets(tw);
+	draw_flush_all(tw->c);
+}
+
+static void
+call_users_function(TWindow* tw,void(*fun)())
 {
 	int i;
 
 	if(!fun)return;
 	(*fun)();
-	recalculate_size();
-	/* the content of some widgets has probably changed, recalculate all the
+	recalculate_size(tw);
+	/* the content of some tw->widgets has probably changed, recalculate all the
 	 * special parameters! */
-	for(i = 0; i < widget_count; i++) {
-		if(widgets[i].type == TEXT_FIELD) {
-			refresh_text_field(widgets[i].widget.t);
+	for(i = 0; i < tw->widget_count; i++) {
+		if(tw->widgets[i].type == TEXT_FIELD) {
+			refresh_text_field(tw,tw->widgets[i].widget.t);
 		}
 	}
-	toolkit_redraw_widgets();
+	redraw_widgets(tw);
 }
 
 static void
-recalculate_size()
+recalculate_size(TWindow* tw)
 {
 	int i;
-	for(i = 0; i < widget_count; i++) {
-		widgets[i].widget.a->x = widgets[i].widget.a->position.abs.x + widgets[i].widget.a->position.lin.x*c.w;
-		widgets[i].widget.a->y = widgets[i].widget.a->position.abs.y + widgets[i].widget.a->position.lin.y*c.h;
-		widgets[i].widget.a->w = widgets[i].widget.a->size.abs.w     + widgets[i].widget.a->    size.lin.w*c.w;
-		widgets[i].widget.a->h = widgets[i].widget.a->size.abs.h     + widgets[i].widget.a->    size.lin.h*c.h;
+	for(i = 0; i < tw->widget_count; i++) {
+		tw->widgets[i].widget.a->x = tw->widgets[i].widget.a->position.abs.x + tw->widgets[i].widget.a->position.lin.x*tw->c.w;
+		tw->widgets[i].widget.a->y = tw->widgets[i].widget.a->position.abs.y + tw->widgets[i].widget.a->position.lin.y*tw->c.h;
+		tw->widgets[i].widget.a->w = tw->widgets[i].widget.a->size.abs.w     + tw->widgets[i].widget.a->    size.lin.w*tw->c.w;
+		tw->widgets[i].widget.a->h = tw->widgets[i].widget.a->size.abs.h     + tw->widgets[i].widget.a->    size.lin.h*tw->c.h;
 	}
 }
 
@@ -346,8 +321,9 @@ _toolkit_thread_func(void* args)
 	int grasp = 0;
 	TextField* grasped_window;
 	ComboBox* open_combo_box = NULL;
+	TWindow* tw = _i_am_too_lazy_to_do_arguments_right;
 
-	c = draw_init(_toolkit_default_width, _toolkit_default_height, _toolkit_default_name,
+	tw->c = draw_init(tw->default_width, tw->default_height, tw->default_name,
 		ExposureMask |
 		PointerMotionMask |
 		ButtonPressMask |
@@ -355,32 +331,32 @@ _toolkit_thread_func(void* args)
 		KeyPressMask |
 		Button1MotionMask |
 		KeyReleaseMask);
-	toolkit_width  = _toolkit_default_width;
-	toolkit_height = _toolkit_default_height;
+	tw->width  = tw->default_width;
+	tw->height = tw->default_height;
 
-	toolkit_bg                  = create_color(c,0xc0,0xc0,0xc0);
-	toolkit_text_color          = create_color(c,0   ,0   ,0   );
-	toolkit_disabled_text_color = create_color(c,128 ,128 ,128 );
-	toolkit_shade_light         = create_color(c,255 ,255 ,255 );
-	toolkit_shade_dark          = create_color(c,128 ,128 ,128 );
-	toolkit_outline             = create_color(c,0   ,0   ,0   );
-	toolkit_outline_corner      = create_color(c,128 ,128 ,128 );
-	toolkit_text_field_bg       = create_color(c,255 ,255 ,255 );
-	toolkit_selected_bg         = create_color(c,0x76,0x9e,0xc5);
+	tw->bg                  = create_color(tw->c,0xc0,0xc0,0xc0);
+	tw->text_color          = create_color(tw->c,0   ,0   ,0   );
+	tw->disabled_text_color = create_color(tw->c,128 ,128 ,128 );
+	tw->shade_light         = create_color(tw->c,255 ,255 ,255 );
+	tw->shade_dark          = create_color(tw->c,128 ,128 ,128 );
+	tw->outline             = create_color(tw->c,0   ,0   ,0   );
+	tw->outline_corner      = create_color(tw->c,128 ,128 ,128 );
+	tw->text_field_bg       = create_color(tw->c,255 ,255 ,255 );
+	tw->selected_bg         = create_color(tw->c,0x76,0x9e,0xc5);
 
-	toolkit_font = load_font(c,"Sans-serif:size=11");
+	tw->font = load_font(tw->c,"Sans-serif:size=11");
 
-	widgets = malloc(0);
+	tw->widgets = malloc(tw->widget_count=0);
 
-	________toolkit_ready = 1;
+	tw->ready = 1;
 
 
 	for(;;) {
 		meh:
-		if(XPending(c.disp)) XNextEvent(c.disp, &e);
-		else if(_toolkit_has_to_redraw) {
-			toolkit_full_redraw();
-			_toolkit_has_to_redraw = 0;
+		if(XPending(tw->c.disp)) XNextEvent(tw->c.disp, &e);
+		else if(tw->has_to_redraw) {
+			full_redraw(tw);
+			tw->has_to_redraw = 0;
 		}
 		else {
 			usleep(30000);
@@ -388,24 +364,24 @@ _toolkit_thread_func(void* args)
 		}
 		if(e.type == Expose) {
 			if(e.xexpose.count == 0) {
-				draw_resize(c,e.xexpose.width, e.xexpose.height);
-				recalculate_size();
-				toolkit_full_redraw();
+				draw_resize(&tw->c,e.xexpose.width, e.xexpose.height);
+				recalculate_size(tw);
+				full_redraw(tw);
 			}
 
 		} else if(e.type == MotionNotify) {
-			pointer_x = e.xmotion.x;
-			pointer_y = e.xmotion.y;
+			tw->pointer_x = e.xmotion.x;
+			tw->pointer_y = e.xmotion.y;
 			/* this part of code scrolls text fields when we're dragging the
 			 * scroll handle thing */
 			if(e.xmotion.state & Button1Mask) {
-				for(i = 0; i < widget_count; i++) {
-					if(widgets[i].type == TEXT_FIELD) {
-						if(widgets[i].widget.t->scrollable && grasp && grasped_window == widgets[i].widget.t) {
-								widgets[i].widget.t->scroll = (pointer_y - grasp - widgets[i].widget.t->y)*(widgets[i].widget.t->max_scroll+1)/(widgets[i].widget.t->h-50);
-								widgets[i].widget.t->scroll = widgets[i].widget.t->scroll < 0 ? 0 : widgets[i].widget.t->scroll;
-								widgets[i].widget.t->scroll = widgets[i].widget.t->scroll > widgets[i].widget.t->max_scroll ? widgets[i].widget.t->max_scroll : widgets[i].widget.t->scroll;
-								draw_text_field(*widgets[i].widget.t);
+				for(i = 0; i < tw->widget_count; i++) {
+					if(tw->widgets[i].type == TEXT_FIELD) {
+						if(tw->widgets[i].widget.t->scrollable && grasp && grasped_window == tw->widgets[i].widget.t) {
+								tw->widgets[i].widget.t->scroll = (tw->pointer_y - grasp - tw->widgets[i].widget.t->y)*(tw->widgets[i].widget.t->max_scroll+1)/(tw->widgets[i].widget.t->h-50);
+								tw->widgets[i].widget.t->scroll = tw->widgets[i].widget.t->scroll < 0 ? 0 : tw->widgets[i].widget.t->scroll;
+								tw->widgets[i].widget.t->scroll = tw->widgets[i].widget.t->scroll > tw->widgets[i].widget.t->max_scroll ? tw->widgets[i].widget.t->max_scroll : tw->widgets[i].widget.t->scroll;
+								draw_text_field(tw,*tw->widgets[i].widget.t);
 						}
 					}
 				}
@@ -413,113 +389,113 @@ _toolkit_thread_func(void* args)
 			/* if there is a combo box open, see which option is selected */
 			if(open_combo_box) {
 				for(j = 0; open_combo_box->options[j]; j++) {
-					if(pointer_x >= open_combo_box->x && pointer_y >= open_combo_box->y + j*open_combo_box->h && pointer_y <= open_combo_box->y + open_combo_box->h * (j+1) && pointer_x <= open_combo_box->x + open_combo_box->w) {
+					if(tw->pointer_x >= open_combo_box->x && tw->pointer_y >= open_combo_box->y + j*open_combo_box->h && tw->pointer_y <= open_combo_box->y + open_combo_box->h * (j+1) && tw->pointer_x <= open_combo_box->x + open_combo_box->w) {
 						open_combo_box->selected_option = j+1;
-						draw_combo_box(*open_combo_box);
+						draw_combo_box(tw,*open_combo_box);
 					}
 				}
 			}
 		/* if a mouse button is pressed */
 		} else if(e.type == ButtonPress) {
-			pointer_down = 1;
+			tw->pointer_down = 1;
 
 			/* for every widget */
-			for(i = 0;i < widget_count;i++) {
+			for(i = 0;i < tw->widget_count;i++) {
 
 				/* if clicked, deselect all text fields
 				 * if we click on the same field, it will
 				 * get selected later in this cycle */
-				if(widgets[i].type == TEXT_FIELD){
-					if(widgets[i].widget.t->selected) {
-						widgets[i].widget.t->selected = 0;
-						draw_text_field(*widgets[i].widget.t);
+				if(tw->widgets[i].type == TEXT_FIELD){
+					if(tw->widgets[i].widget.t->selected) {
+						tw->widgets[i].widget.t->selected = 0;
+						draw_text_field(tw,*tw->widgets[i].widget.t);
 					}
 				/* the same for combo boxes, except that we
 				 * don't want to select anything back, so just
 				 * say we're done with this event*/
-				} else if(widgets[i].type == COMBO_BOX) {
-					if(widgets[i].widget.c->open) {
-						widgets[i].widget.c->open = 0;
+				} else if(tw->widgets[i].type == COMBO_BOX) {
+					if(tw->widgets[i].widget.c->open) {
+						tw->widgets[i].widget.c->open = 0;
 						open_combo_box = NULL;
-						call_users_function(widgets[i].widget.c->on_select_option);
-						toolkit_full_redraw();
+						call_users_function(tw,tw->widgets[i].widget.c->on_select_option);
+						full_redraw(tw);
 						goto meh;
 					}
 				}
 
 
 				/* if we click on a widget */
-				if(pointer_x >= widgets[i].widget.b->x && pointer_x <= widgets[i].widget.b->x + widgets[i].widget.b->w && pointer_y >= widgets[i].widget.b->y && pointer_y <= widgets[i].widget.b->y+widgets[i].widget.b->h) {
+				if(tw->pointer_x >= tw->widgets[i].widget.b->x && tw->pointer_x <= tw->widgets[i].widget.b->x + tw->widgets[i].widget.b->w && tw->pointer_y >= tw->widgets[i].widget.b->y && tw->pointer_y <= tw->widgets[i].widget.b->y+tw->widgets[i].widget.b->h) {
 
 
 					/* if we click on a button */
-					if(widgets[i].type == BUTTON) {
+					if(tw->widgets[i].type == BUTTON) {
 						/* we need to see if we have changed it's state */
-						old = widgets[i].widget.b->pressed;
-						if(widgets[i].widget.b->toggle) widgets[i].widget.b->pressed = !widgets[i].widget.b->pressed;
-						else widgets[i].widget.b->pressed = 1;
+						old = tw->widgets[i].widget.b->pressed;
+						if(tw->widgets[i].widget.b->toggle) tw->widgets[i].widget.b->pressed = !tw->widgets[i].widget.b->pressed;
+						else tw->widgets[i].widget.b->pressed = 1;
 						/* it the button's state has changed form 0 to 1, call on_press */
-						if(widgets[i].widget.b->pressed && !old) call_users_function(widgets[i].widget.b->on_press);
+						if(tw->widgets[i].widget.b->pressed && !old) call_users_function(tw,tw->widgets[i].widget.b->on_press);
 						/* if a toggle button is released */
-						if(!widgets[i].widget.b->pressed && old) call_users_function(widgets[i].widget.b->on_release);
+						if(!tw->widgets[i].widget.b->pressed && old) call_users_function(tw,tw->widgets[i].widget.b->on_release);
 						/* draw the button because it's state has changed */
-						draw_button(*widgets[i].widget.b);
+						draw_button(tw,*tw->widgets[i].widget.b);
 
 
 					/* if we click on a text field */
-					} else if (widgets[i].type == TEXT_FIELD) {
-						if(widgets[i].widget.t->scrollable && e.xbutton.button == 1) {
+					} else if (tw->widgets[i].type == TEXT_FIELD) {
+						if(tw->widgets[i].widget.t->scrollable && e.xbutton.button == 1) {
 							/* if we click on the scroll hanle thingy on the right */
-							if(pointer_x >= widgets[i].widget.t->x+widgets[i].widget.t->w-15 && pointer_y >= widgets[i].widget.t->y+widgets[i].widget.t->scroll*(widgets[i].widget.t->h-50)/(widgets[i].widget.t->max_scroll+1) && pointer_x <= widgets[i].widget.t->x+widgets[i].widget.t->w && pointer_y <= widgets[i].widget.t->y+widgets[i].widget.t->scroll*(widgets[i].widget.t->h-50)/(widgets[i].widget.t->max_scroll+1)+50) {
+							if(tw->pointer_x >= tw->widgets[i].widget.t->x+tw->widgets[i].widget.t->w-15 && tw->pointer_y >= tw->widgets[i].widget.t->y+tw->widgets[i].widget.t->scroll*(tw->widgets[i].widget.t->h-50)/(tw->widgets[i].widget.t->max_scroll+1) && tw->pointer_x <= tw->widgets[i].widget.t->x+tw->widgets[i].widget.t->w && tw->pointer_y <= tw->widgets[i].widget.t->y+tw->widgets[i].widget.t->scroll*(tw->widgets[i].widget.t->h-50)/(tw->widgets[i].widget.t->max_scroll+1)+50) {
 								/* calculate the relative position of the scroll handle to the pinter */
-								grasp = pointer_y -( widgets[i].widget.t->y+widgets[i].widget.t->scroll*(widgets[i].widget.t->h-50)/(widgets[i].widget.t->max_scroll+1));
-								grasped_window = widgets[i].widget.t;
+								grasp = tw->pointer_y -( tw->widgets[i].widget.t->y+tw->widgets[i].widget.t->scroll*(tw->widgets[i].widget.t->h-50)/(tw->widgets[i].widget.t->max_scroll+1));
+								grasped_window = tw->widgets[i].widget.t;
 							}
 						}
 
 						/* select an input field if we click on it */
-						if(widgets[i].widget.t->input && e.xbutton.button == 1) {
-							widgets[i].widget.t->selected = 1;
-							draw_text_field(*widgets[i].widget.t);
+						if(tw->widgets[i].widget.t->input && e.xbutton.button == 1) {
+							tw->widgets[i].widget.t->selected = 1;
+							draw_text_field(tw,*tw->widgets[i].widget.t);
 						}
 
 						/* scroll a field with buttons 4 and 5 */
-						if(widgets[i].widget.t->scrollable) {
-							if(e.xbutton.button == 4 && widgets[i].widget.t->scroll >= SCROLL_AMOUNT) {
-								widgets[i].widget.t->scroll-=SCROLL_AMOUNT;
-								draw_text_field(*widgets[i].widget.t);
-							} else if(e.xbutton.button == 5 && widgets[i].widget.t->scroll <= widgets[i].widget.t->max_scroll-SCROLL_AMOUNT) {
-								widgets[i].widget.t->scroll+=SCROLL_AMOUNT;
-								draw_text_field(*widgets[i].widget.t);
+						if(tw->widgets[i].widget.t->scrollable) {
+							if(e.xbutton.button == 4 && tw->widgets[i].widget.t->scroll >= SCROLL_AMOUNT) {
+								tw->widgets[i].widget.t->scroll-=SCROLL_AMOUNT;
+								draw_text_field(tw,*tw->widgets[i].widget.t);
+							} else if(e.xbutton.button == 5 && tw->widgets[i].widget.t->scroll <= tw->widgets[i].widget.t->max_scroll-SCROLL_AMOUNT) {
+								tw->widgets[i].widget.t->scroll+=SCROLL_AMOUNT;
+								draw_text_field(tw,*tw->widgets[i].widget.t);
 							}
 						}
-					} else if(widgets[i].type == COMBO_BOX) {
+					} else if(tw->widgets[i].type == COMBO_BOX) {
 						/* selecting a combo box */
 						if(e.xbutton.button == 1) {
-							widgets[i].widget.c->open = 1;
-							open_combo_box = widgets[i].widget.c;
-						} else if(e.xbutton.button == 4 && widgets[i].widget.c->selected_option > 1) {
-							widgets[i].widget.c->selected_option--;
-							call_users_function(widgets[i].widget.c->on_select_option);
-						} else if(e.xbutton.button == 5 && widgets[i].widget.c->options[widgets[i].widget.c->selected_option]) {
-							widgets[i].widget.c->selected_option++;
-							call_users_function(widgets[i].widget.c->on_select_option);
+							tw->widgets[i].widget.c->open = 1;
+							open_combo_box = tw->widgets[i].widget.c;
+						} else if(e.xbutton.button == 4 && tw->widgets[i].widget.c->selected_option > 1) {
+							tw->widgets[i].widget.c->selected_option--;
+							call_users_function(tw,tw->widgets[i].widget.c->on_select_option);
+						} else if(e.xbutton.button == 5 && tw->widgets[i].widget.c->options[tw->widgets[i].widget.c->selected_option]) {
+							tw->widgets[i].widget.c->selected_option++;
+							call_users_function(tw,tw->widgets[i].widget.c->on_select_option);
 						}
-						draw_combo_box(*widgets[i].widget.c);
+						draw_combo_box(tw,*tw->widgets[i].widget.c);
 					}
 				}
 			}
 		} else if(e.type == ButtonRelease) {
-			pointer_down = 0;
+			tw->pointer_down = 0;
 			grasp = 0;
 			/* deselect every button */
-			for(i = 0;i < widget_count;i++) {
-				if(widgets[i].type == BUTTON) {
-					if(!widgets[i].widget.b->toggle) {
-						if(widgets[i].widget.b->pressed) {
-							widgets[i].widget.b->pressed = 0;
-							draw_button(*widgets[i].widget.b);
-							call_users_function(widgets[i].widget.b->on_release);
+			for(i = 0;i < tw->widget_count;i++) {
+				if(tw->widgets[i].type == BUTTON) {
+					if(!tw->widgets[i].widget.b->toggle) {
+						if(tw->widgets[i].widget.b->pressed) {
+							tw->widgets[i].widget.b->pressed = 0;
+							draw_button(tw,*tw->widgets[i].widget.b);
+							call_users_function(tw,tw->widgets[i].widget.b->on_release);
 						}
 					}
 				}
@@ -527,24 +503,24 @@ _toolkit_thread_func(void* args)
 		} else if(e.type == KeyPress) {
 			/* typing into input fields */
 			XLookupString(&e.xkey, s, 64, &k, NULL);
-			for(i = 0; i < widget_count; i++) {
-				if(widgets[i].type == TEXT_FIELD) {
-					if(widgets[i].widget.t->input && widgets[i].widget.t->selected){
+			for(i = 0; i < tw->widget_count; i++) {
+				if(tw->widgets[i].type == TEXT_FIELD) {
+					if(tw->widgets[i].widget.t->input && tw->widgets[i].widget.t->selected){
 						if(!s[1] && *s) {
-							l = strlen(widgets[i].widget.t->typed_text);
+							l = strlen(tw->widgets[i].widget.t->typed_text);
 							if(k == XK_BackSpace) {
 								if(l) {
-									widgets[i].widget.t->typed_text = realloc(widgets[i].widget.t->typed_text, l);
-									widgets[i].widget.t->typed_text[l-1] = 0;
+									tw->widgets[i].widget.t->typed_text = realloc(tw->widgets[i].widget.t->typed_text, l);
+									tw->widgets[i].widget.t->typed_text[l-1] = 0;
 								}
 							} else {
 								if(*s == 0x0d) *s = '\n';
-								widgets[i].widget.t->typed_text = realloc(widgets[i].widget.t->typed_text, ++l+1);
-								widgets[i].widget.t->typed_text[l] = 0;
-								widgets[i].widget.t->typed_text[l-1] = *s;
+								tw->widgets[i].widget.t->typed_text = realloc(tw->widgets[i].widget.t->typed_text, ++l+1);
+								tw->widgets[i].widget.t->typed_text[l] = 0;
+								tw->widgets[i].widget.t->typed_text[l-1] = *s;
 							}
-							call_users_function(widgets[i].widget.t->on_content_changed);
-							draw_text_field(*widgets[i].widget.t);
+							call_users_function(tw,tw->widgets[i].widget.t->on_content_changed);
+							draw_text_field(tw,*tw->widgets[i].widget.t);
 						}
 					}
 				}
@@ -554,51 +530,54 @@ _toolkit_thread_func(void* args)
 }
 
 /* starts a separate thread for all the widget logic */
-int
+TWindow*
 toolkit_init(int w, int h, char* name) {
-	_toolkit_default_width = w;
-	_toolkit_default_height = h;
-	_toolkit_default_name = name;
-	pthread_create(&_toolkit_thread, NULL, _toolkit_thread_func, NULL);
-	while(!________toolkit_ready) usleep(50000); 
+	TWindow* tw = malloc(sizeof(TWindow));
+	_i_am_too_lazy_to_do_arguments_right = tw;
+	tw->ready = 0;
+	tw->default_width = w;
+	tw->default_height = h;
+	tw->default_name = name;
+	pthread_create(&tw->thread, NULL, _toolkit_thread_func, NULL);
+	while(!tw->ready) usleep(50000); 
 	usleep(50000);
-	return 0;
+	return tw;
 }
 
 /* these funtions add elements to the widget list and initialize some fields */
 void
-toolkit_show_button(Button* b)
+toolkit_show_button(TWindow* tw, Button* b)
 {
 	b->pressed = 0;
-	widgets = realloc(widgets, (++widget_count)*sizeof(_toolkit_widget));
-	widgets[widget_count-1] = (_toolkit_widget) {
+	tw->widgets = realloc(tw->widgets, (++tw->widget_count)*sizeof(_toolkit_widget));
+	tw->widgets[tw->widget_count-1] = (_toolkit_widget) {
 		.type = BUTTON,
 		.widget.b = b
 	};
-	widgets[widget_count-1].widget.b->_text_length = draw_string_width(c,toolkit_font, b->text);
-	recalculate_size();
-	toolkit_redraw_widgets();
+	tw->widgets[tw->widget_count-1].widget.b->_text_length = draw_string_width(tw->c,tw->font, b->text);
+	recalculate_size(tw);
+	redraw_widgets(tw);
 }
 
 void
-toolkit_show_label(Label* l)
+toolkit_show_label(TWindow* tw, Label* l)
 {
-	widgets = realloc(widgets, (++widget_count)*sizeof(_toolkit_widget));
-	widgets[widget_count-1] = (_toolkit_widget) {
+	tw->widgets = realloc(tw->widgets, (++tw->widget_count)*sizeof(_toolkit_widget));
+	tw->widgets[tw->widget_count-1] = (_toolkit_widget) {
 		.type = LABEL,
 		.widget.l = l
 	};
-	recalculate_size();
-	toolkit_redraw_widgets();
+	recalculate_size(tw);
+	redraw_widgets(tw);
 }
 
 void
-toolkit_show_text_field(TextField* b)
+toolkit_show_text_field(TWindow* tw, TextField* b)
 {
 	b->selected = 0;
 	b->scroll = 0;
-	widgets = realloc(widgets, (++widget_count)*sizeof(_toolkit_widget));
-	widgets[widget_count-1] = (_toolkit_widget) {
+	tw->widgets = realloc(tw->widgets, (++tw->widget_count)*sizeof(_toolkit_widget));
+	tw->widgets[tw->widget_count-1] = (_toolkit_widget) {
 		.type = TEXT_FIELD,
 		.widget.t = b
 	};
@@ -606,33 +585,33 @@ toolkit_show_text_field(TextField* b)
 		b->typed_text = malloc(1);
 		*b->typed_text = 0;
 	}
-	refresh_text_field(b);
-	recalculate_size();
-	toolkit_redraw_widgets();
+	refresh_text_field(tw,b);
+	recalculate_size(tw);
+	redraw_widgets(tw);
 }
 
 void
-toolkit_show_combo_box(ComboBox* c)
+toolkit_show_combo_box(TWindow* tw, ComboBox* c)
 {
 	c->open = 0;
 	c->selected_option = 0;
-	widgets = realloc(widgets, (++widget_count)*sizeof(_toolkit_widget));
-	widgets[widget_count-1] = (_toolkit_widget) {
+	tw->widgets = realloc(tw->widgets, (++tw->widget_count)*sizeof(_toolkit_widget));
+	tw->widgets[tw->widget_count-1] = (_toolkit_widget) {
 		.type = COMBO_BOX,
 		.widget.c = c
 	};
-	recalculate_size();
-	toolkit_redraw_widgets();
+	recalculate_size(tw);
+	redraw_widgets(tw);
 }
 
 int
-toolkit_remove_widget(void* widget)
+toolkit_remove_widget(TWindow* tw, void* widget)
 {
 	int i;
-	for(i = 0; i < widget_count; i++) {
-		if(widgets[i].widget.a == widget) {
-			memmove(&widgets[i], &widgets[i+1], (--widget_count-i)*sizeof(_toolkit_widget));
-			toolkit_redraw();
+	for(i = 0; i < tw->widget_count; i++) {
+		if(tw->widgets[i].widget.a == widget) {
+			memmove(&tw->widgets[i], &tw->widgets[i+1], (--tw->widget_count-i)*sizeof(_toolkit_widget));
+			toolkit_redraw(tw);
 			return 0;
 		}
 	}
@@ -644,7 +623,7 @@ toolkit_remove_widget(void* widget)
 /* at least we don't have to redraw multiple times when nothing's had time to
  * change */
 void
-toolkit_redraw()
+toolkit_redraw(TWindow* tw)
 {
-	_toolkit_has_to_redraw = 1;
+	tw->has_to_redraw = 1;
 }

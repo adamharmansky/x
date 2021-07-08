@@ -108,11 +108,11 @@ draw_flush(draw_context c, int x, int y, int w, int h)
 }
 
 void
-draw_resize(draw_context c, int w, int h)
+draw_resize(draw_context* c, int w, int h)
 {
-	XFreePixmap(c.disp, c.drawable);
-	c.drawable = XCreatePixmap(c.disp, c.win, w, h, DefaultDepth(c.disp, c.scr));
-	c.w = w;
-	c.h = h;
-	XftDrawChange(c.draw, c.drawable);
+	XFreePixmap(c->disp, c->drawable);
+	c->drawable = XCreatePixmap(c->disp, c->win, w, h, DefaultDepth(c->disp, c->scr));
+	c->w = w;
+	c->h = h;
+	XftDrawChange(c->draw, c->drawable);
 }
