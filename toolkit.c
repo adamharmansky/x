@@ -33,7 +33,9 @@ refresh_text_field(TWindow* tw,TextField* t)
 		y = 3 + tw->font.xftfont->ascent;
 		x_limit = t->w - 3 - t->scrollable*16;
 
+		if(0 == t->cursor_position) t->cursor_y = y;
 		for(i = 0; text[i]; i++) {
+			if(i+1 == t->cursor_position) t->cursor_y = y;
 			if(text[i] == '\n' || x >= x_limit) {
 				x = 3;
 				y += tw->font.xftfont->height;
@@ -43,7 +45,7 @@ refresh_text_field(TWindow* tw,TextField* t)
 				x += draw_char_width(tw->c,tw->font, text[i]);
 			}
 		}
-		t->max_scroll = y-t->h;
+		t->max_scroll = y-tw->font.xftfont->ascent;
 	}
 	if(t->scroll < 0) t->scroll = 0;
 	if(t->scroll > t->max_scroll) t->scroll = t->max_scroll;
@@ -144,7 +146,6 @@ draw_text_field(TWindow* tw,TextField b)
 	draw_rectangle(tw->c,b.x+b.w, b.y-1,   1, 1, tw->outline_corner);
 	draw_rectangle(tw->c,b.x-1  , b.y+b.h, 1, 1, tw->outline_corner);
 	draw_rectangle(tw->c,b.x+b.w, b.y+b.h, 1, 1, tw->outline_corner);
-	//draw_rectangle(tw->c,b.x, b.y, b.w - b.scrollable*16, b.h, tw->text_field_bg);
 
 	x = 3;
 	y = tw->font.xftfont->ascent - b.scroll;
@@ -161,6 +162,7 @@ draw_text_field(TWindow* tw,TextField b)
 
 	XftDrawSetClipRectangles(tw->c.draw, 0, 0, recs, 1);
 	draw_rectangle(tw->c,b.x, b.y, b.w, b.h, tw->text_field_bg);
+	if(b.input && b.selected && 0 == b.cursor_position) draw_rectangle(tw->c,x+b.x, y+b.y-tw->font.xftfont->ascent, 2,tw->font.xftfont->ascent,tw->text_color);
 	for(i = 0; text[i] && y<y_limit_low; i++) {
 		if(x >= x_limit) {
 			x = 3;
@@ -188,9 +190,9 @@ draw_text_field(TWindow* tw,TextField b)
 			draw_char(tw->c,x+ b.x, y + b.y, tw->font, text[i], color);
 			x += draw_char_width(tw->c,tw->font, text[i]);
 		}
+		if(b.input && b.selected && i+1 == b.cursor_position) draw_rectangle(tw->c,x+b.x, y+b.y-tw->font.xftfont->ascent, 2,tw->font.xftfont->ascent,tw->text_color);
 	}
 
-	if(b.input && b.selected)draw_rectangle(tw->c,x+b.x, y+b.y-tw->font.xftfont->ascent, 2,tw->font.xftfont->ascent,tw->text_color);
 
 	/* draw the scrollbar */
 	if(b.scrollable) {
@@ -512,26 +514,39 @@ _toolkit_thread_func(void* args)
 			for(i = 0; i < tw->widget_count; i++) {
 				if(tw->widgets[i].type == TEXT_FIELD) {
 					if(tw->widgets[i].widget.t->input && tw->widgets[i].widget.t->selected){
+						/* for one-byte characters */
 						if(!s[1] && *s) {
 							l = strlen(tw->widgets[i].widget.t->typed_text);
-							if(k == XK_BackSpace) {
-								if(l) {
+							if(k == XK_BackSpace ) {
+								if(tw->widgets[i].widget.t->cursor_position) {
+									memmove(tw->widgets[i].widget.t->typed_text+tw->widgets[i].widget.t->cursor_position-1, tw->widgets[i].widget.t->typed_text+tw->widgets[i].widget.t->cursor_position, l-tw->widgets[i].widget.t->cursor_position);
 									tw->widgets[i].widget.t->typed_text = realloc(tw->widgets[i].widget.t->typed_text, l);
 									tw->widgets[i].widget.t->typed_text[l-1] = 0;
+									tw->widgets[i].widget.t->cursor_position--;
 								}
 							} else {
 								if(*s == 0x0d) *s = '\n';
-								tw->widgets[i].widget.t->typed_text = realloc(tw->widgets[i].widget.t->typed_text, ++l+1);
-								tw->widgets[i].widget.t->typed_text[l] = 0;
-								tw->widgets[i].widget.t->typed_text[l-1] = *s;
+								tw->widgets[i].widget.t->typed_text = realloc(tw->widgets[i].widget.t->typed_text, l+2);
+								memmove(
+									&tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position+1],
+									&tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position],
+									l-tw->widgets[i].widget.t->cursor_position+1);
+								tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position] = *s;
+								tw->widgets[i].widget.t->cursor_position++;
 							}
-							refresh_text_field(tw, tw->widgets[i].widget.t);
-							if(tw->widgets[i].widget.t->max_scroll > 0) {
-								tw->widgets[i].widget.t->scroll = tw->widgets[i].widget.t->max_scroll;
-							}
-							call_users_function(tw,tw->widgets[i].widget.t->on_content_changed);
-							draw_text_field(tw,*tw->widgets[i].widget.t);
+						} else if (k == XK_Left) {
+							if(tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position-1])
+								tw->widgets[i].widget.t->cursor_position--;
+						} else if (k == XK_Right) {
+							if(tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position])
+								tw->widgets[i].widget.t->cursor_position++;
 						}
+						refresh_text_field(tw, tw->widgets[i].widget.t);
+						if(tw->widgets[i].widget.t->scrollable && tw->widgets[i].widget.t->cursor_y - tw->widgets[i].widget.t->scroll > tw->widgets[i].widget.t->h) {
+							tw->widgets[i].widget.t->scroll+=tw->font.xftfont->height;
+						}
+						call_users_function(tw,tw->widgets[i].widget.t->on_content_changed);
+						draw_text_field(tw,*tw->widgets[i].widget.t);
 					}
 				}
 			}
@@ -591,6 +606,7 @@ toolkit_show_text_field(TWindow* tw, TextField* b)
 {
 	b->selected = 0;
 	b->scroll = 0;
+	b->cursor_position = 0;
 	tw->widgets = realloc(tw->widgets, (++tw->widget_count)*sizeof(_toolkit_widget));
 	tw->widgets[tw->widget_count-1] = (_toolkit_widget) {
 		.type = TEXT_FIELD,

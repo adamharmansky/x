@@ -90,9 +90,8 @@ typedef struct {
 	char scrollable;
 	int scroll;
 	int max_scroll;
-	int cursor_x;
-	int cursor_y;
 	int cursor_position;
+	int cursor_y;
 } TextField;
 
 typedef struct {
