@@ -5,9 +5,14 @@
 
 #define SCROLL_AMOUNT 20
 
+const XRectangle RECTS_RESET[] = {
+	(XRectangle){.x = 0, .y = 0, .width = ~0, .height = ~0}
+};
+
 static int _toolkit_default_width, _toolkit_default_height;
 static char* _toolkit_default_name;
 static pthread_t _toolkit_thread;
+static draw_context c;
 
 static int pointer_x, pointer_y, pointer_down;
 
@@ -15,6 +20,8 @@ int toolkit_width, toolkit_height;
 
 static char ________toolkit_ready = 0;
 static char _toolkit_has_to_redraw = 0;
+
+static void recalculate_size();
 
 color_t toolkit_bg;
 color_t toolkit_text_color;
@@ -38,7 +45,7 @@ refresh_text_field(TextField* t)
 	int i;
 	int x_limit;
 
-	t->_text_length = draw_string_width(toolkit_font, t->text);
+	t->_text_length = draw_string_width(c,toolkit_font, t->text);
 
 	if(t->scrollable) {
 		x = 3;
@@ -52,7 +59,7 @@ refresh_text_field(TextField* t)
 			} else if(t->text[i] == '\t') {
 				x += 24;
 			} else {
-				x += draw_char_width(toolkit_font, t->text[i]);
+				x += draw_char_width(c,toolkit_font, t->text[i]);
 			}
 		}
 		t->max_scroll = y-t->h/2;
@@ -68,39 +75,39 @@ draw_button(Button b)
 	int xx, yy;
 
 	if(b.toggle) {
-		draw_rectangle(b.x, b.y, b.w, b.h, toolkit_bg);
+		draw_rectangle(c,b.x, b.y, b.w, b.h, toolkit_bg);
 		xx = b.x + 9;
 		yy = b.y + b.h/2;
-		draw_text(b.x + 18, b.y + b.h/2 + toolkit_font.xftfont->ascent/2-2, toolkit_font, b.text, toolkit_text_color);
-		draw_rectangle(xx-6,yy-6,13,13,toolkit_outline);
-		draw_rectangle(xx-5,yy-5,11,11,toolkit_text_field_bg);
+		draw_text(c,b.x + 18, b.y + b.h/2 + toolkit_font.xftfont->ascent/2-2, toolkit_font, b.text, toolkit_text_color);
+		draw_rectangle(c,xx-6,yy-6,13,13,toolkit_outline);
+		draw_rectangle(c,xx-5,yy-5,11,11,toolkit_text_field_bg);
 		if(b.pressed) {
 			for(i = 0; i < 6; i++) {
-				draw_rectangle(xx-i,yy-i,1,1,toolkit_outline);
-				draw_rectangle(xx+i,yy-i,1,1,toolkit_outline);
-				draw_rectangle(xx-i,yy+i,1,1,toolkit_outline);
-				draw_rectangle(xx+i,yy+i,1,1,toolkit_outline);
+				draw_rectangle(c,xx-i,yy-i,1,1,toolkit_outline);
+				draw_rectangle(c,xx+i,yy-i,1,1,toolkit_outline);
+				draw_rectangle(c,xx-i,yy+i,1,1,toolkit_outline);
+				draw_rectangle(c,xx+i,yy+i,1,1,toolkit_outline);
 			}
 		}
 	} else {
-		draw_rectangle(b.x-1, b.y-1, b.w+2, b.h+2, toolkit_outline);
+		draw_rectangle(c,b.x-1, b.y-1, b.w+2, b.h+2, toolkit_outline);
 
-		draw_rectangle(b.x-1  , b.y-1,   1, 1, toolkit_outline_corner);
-		draw_rectangle(b.x+b.w, b.y-1,   1, 1, toolkit_outline_corner);
-		draw_rectangle(b.x-1  , b.y+b.h, 1, 1, toolkit_outline_corner);
-		draw_rectangle(b.x+b.w, b.y+b.h, 1, 1, toolkit_outline_corner);
+		draw_rectangle(c,b.x-1  , b.y-1,   1, 1, toolkit_outline_corner);
+		draw_rectangle(c,b.x+b.w, b.y-1,   1, 1, toolkit_outline_corner);
+		draw_rectangle(c,b.x-1  , b.y+b.h, 1, 1, toolkit_outline_corner);
+		draw_rectangle(c,b.x+b.w, b.y+b.h, 1, 1, toolkit_outline_corner);
 		if(b.pressed) {
-			draw_rectangle(b.x, b.y, b.w, b.h, toolkit_shade_dark);
-			draw_rectangle(b.x+2, b.y+2, b.w-2, b.h-2, toolkit_shade_light);
-			draw_rectangle(b.x+2, b.y+2, b.w-3, b.h-3, toolkit_bg);
+			draw_rectangle(c,b.x, b.y, b.w, b.h, toolkit_shade_dark);
+			draw_rectangle(c,b.x+2, b.y+2, b.w-2, b.h-2, toolkit_shade_light);
+			draw_rectangle(c,b.x+2, b.y+2, b.w-3, b.h-3, toolkit_bg);
 		} else {
-			draw_rectangle(b.x, b.y, b.w, b.h, toolkit_shade_light);
-			draw_rectangle(b.x+1, b.y+1, b.w-1, b.h-1, toolkit_shade_dark);
-			draw_rectangle(b.x+1, b.y+1, b.w-3, b.h-3, toolkit_bg);
+			draw_rectangle(c,b.x, b.y, b.w, b.h, toolkit_shade_light);
+			draw_rectangle(c,b.x+1, b.y+1, b.w-1, b.h-1, toolkit_shade_dark);
+			draw_rectangle(c,b.x+1, b.y+1, b.w-3, b.h-3, toolkit_bg);
 		}
-		draw_text(b.x+b.w/2-b._text_length/2 + b.pressed, b.y + b.h/2 + toolkit_font.xftfont->ascent/2-3 + b.pressed, toolkit_font, b.text, toolkit_text_color);
+		draw_text(c,b.x+b.w/2-b._text_length/2 + b.pressed, b.y + b.h/2 + toolkit_font.xftfont->ascent/2-3 + b.pressed, toolkit_font, b.text, toolkit_text_color);
 	}
-	draw_flush(b.x-1, b.y-1, b.w+2, b.h+2);
+	draw_flush(c,b.x-1, b.y-1, b.w+2, b.h+2);
 }
 
 static void
@@ -108,8 +115,8 @@ draw_label(Label l)
 {
 	int x = 3, y = toolkit_font.xftfont->ascent;
 	int i;
-	draw_rectangle(l.x, l.y, l.w, l.h, toolkit_bg);
-	//draw_text(l.x+l.w/2-l._text_length/2, l.y + l.h/2 + toolkit_font.xftfont->ascent/2-3, toolkit_font, l.text, toolkit_text_color);
+	draw_rectangle(c,l.x, l.y, l.w, l.h, toolkit_bg);
+	//draw_text(c,l.x+l.w/2-l._text_length/2, l.y + l.h/2 + toolkit_font.xftfont->ascent/2-3, toolkit_font, l.text, toolkit_text_color);
 	for(i = 0; l.text[i]; i++) {
 		if(x >= l.w - 5) {
 			x = 3;
@@ -123,11 +130,11 @@ draw_label(Label l)
 		} else if(l.text[i] == '\t') {
 			x += 24;
 		} else {
-			draw_char(x+ l.x, y + l.y, toolkit_font, l.text[i], toolkit_text_color);
-			x += draw_char_width(toolkit_font, l.text[i]);
+			draw_char(c,x+ l.x, y + l.y, toolkit_font, l.text[i], toolkit_text_color);
+			x += draw_char_width(c,toolkit_font, l.text[i]);
 		}
 	}
-	draw_flush(l.x, l.y, l.w, l.h);
+	draw_flush(c,l.x, l.y, l.w, l.h);
 }
 
 static void
@@ -146,25 +153,22 @@ draw_text_field(TextField b)
 	XRectangle recs[] = {
 		(XRectangle){.x = b.x, .y = b.y, .width = b.w, .height = b.h}
 	};
-	XRectangle recs_reset[] = {
-		(XRectangle){.x = 0, .y = 0, .width = ~0, .height = ~0}
-	};
 
 	/* draw the frame and the background */
-	draw_rectangle(b.x-1, b.y-1, b.w+2, 1, toolkit_outline);
-	draw_rectangle(b.x-1, b.y-1, 1, b.h+2, toolkit_outline);
-	draw_rectangle(b.x+b.w, b.y-1, 1, b.h+2, toolkit_outline);
-	draw_rectangle(b.x-1, b.y+b.h, b.w+2, 1, toolkit_outline);
+	draw_rectangle(c,b.x-1, b.y-1, b.w+2, 1, toolkit_outline);
+	draw_rectangle(c,b.x-1, b.y-1, 1, b.h+2, toolkit_outline);
+	draw_rectangle(c,b.x+b.w, b.y-1, 1, b.h+2, toolkit_outline);
+	draw_rectangle(c,b.x-1, b.y+b.h, b.w+2, 1, toolkit_outline);
 
-	draw_rectangle(b.x-1  , b.y-1,   1, 1, toolkit_outline_corner);
-	draw_rectangle(b.x+b.w, b.y-1,   1, 1, toolkit_outline_corner);
-	draw_rectangle(b.x-1  , b.y+b.h, 1, 1, toolkit_outline_corner);
-	draw_rectangle(b.x+b.w, b.y+b.h, 1, 1, toolkit_outline_corner);
-	//draw_rectangle(b.x, b.y, b.w - b.scrollable*16, b.h, toolkit_text_field_bg);
+	draw_rectangle(c,b.x-1  , b.y-1,   1, 1, toolkit_outline_corner);
+	draw_rectangle(c,b.x+b.w, b.y-1,   1, 1, toolkit_outline_corner);
+	draw_rectangle(c,b.x-1  , b.y+b.h, 1, 1, toolkit_outline_corner);
+	draw_rectangle(c,b.x+b.w, b.y+b.h, 1, 1, toolkit_outline_corner);
+	//draw_rectangle(c,b.x, b.y, b.w - b.scrollable*16, b.h, toolkit_text_field_bg);
 
 	x = 3;
 	y = toolkit_font.xftfont->ascent - b.scroll;
-	x_limit = b.w - 3 - b.scrollable*16 - draw_char_width(toolkit_font, 'n');
+	x_limit = b.w - 3 - b.scrollable*16 - draw_char_width(c,toolkit_font, 'n');
 	y_limit_low = -toolkit_font.xftfont->ascent;
 	y_limit_high = b.h+toolkit_font.xftfont->descent;
 
@@ -175,8 +179,8 @@ draw_text_field(TextField b)
 		else{ text = b.text; color = toolkit_disabled_text_color;}
 	} else text = b.text;
 
-	XftDrawSetClipRectangles(_draw_draw, 0, 0, recs, 1);
-	draw_rectangle(b.x, b.y, b.w, b.h, toolkit_text_field_bg);
+	XftDrawSetClipRectangles(c.draw, 0, 0, recs, 1);
+	draw_rectangle(c,b.x, b.y, b.w, b.h, toolkit_text_field_bg);
 	for(i = 0; text[i] && y<y_limit_low; i++) {
 		if(x >= x_limit) {
 			x = 3;
@@ -186,7 +190,7 @@ draw_text_field(TextField b)
 			x = 3;
 			y += toolkit_font.xftfont->height;
 		} else if(text[i] == '\t') x += 24;
-		else x += draw_char_width(toolkit_font, text[i]);
+		else x += draw_char_width(c,toolkit_font, text[i]);
 	}
 	for(; text[i]; i++) {
 		if(x >= x_limit) {
@@ -201,78 +205,78 @@ draw_text_field(TextField b)
 		} else if(text[i] == '\t') {
 			x += 24;
 		} else {
-			draw_char(x+ b.x, y + b.y, toolkit_font, text[i], color);
-			x += draw_char_width(toolkit_font, text[i]);
+			draw_char(c,x+ b.x, y + b.y, toolkit_font, text[i], color);
+			x += draw_char_width(c,toolkit_font, text[i]);
 		}
 	}
 
-	if(b.input && b.selected)draw_rectangle(x+b.x, y+b.y-toolkit_font.xftfont->ascent, 2,toolkit_font.xftfont->ascent,toolkit_text_color);
+	if(b.input && b.selected)draw_rectangle(c,x+b.x, y+b.y-toolkit_font.xftfont->ascent, 2,toolkit_font.xftfont->ascent,toolkit_text_color);
 
 	/* draw the scrollbar */
 	if(b.scrollable) {
 		scrollbar_y = b.y+b.scroll*(b.h-50)/(b.max_scroll+1);
-		draw_rectangle(b.x+b.w-16, b.y-1, 1, b.h+2,  toolkit_outline);
-		draw_rectangle(b.x+b.w-15, b.y, 15, b.h,  toolkit_bg);
-		draw_rectangle(b.x+b.w-15, scrollbar_y-1, 15, 52,  toolkit_outline);
-		draw_rectangle(b.x+b.w-15, scrollbar_y, 15, 50,  toolkit_shade_light);
-		draw_rectangle(b.x+b.w-14, scrollbar_y+1, 14, 49,  toolkit_shade_dark);
-		draw_rectangle(b.x+b.w-14, scrollbar_y+1, 12, 47,  toolkit_bg);
+		draw_rectangle(c,b.x+b.w-16, b.y-1, 1, b.h+2,  toolkit_outline);
+		draw_rectangle(c,b.x+b.w-15, b.y, 15, b.h,  toolkit_bg);
+		draw_rectangle(c,b.x+b.w-15, scrollbar_y-1, 15, 52,  toolkit_outline);
+		draw_rectangle(c,b.x+b.w-15, scrollbar_y, 15, 50,  toolkit_shade_light);
+		draw_rectangle(c,b.x+b.w-14, scrollbar_y+1, 14, 49,  toolkit_shade_dark);
+		draw_rectangle(c,b.x+b.w-14, scrollbar_y+1, 12, 47,  toolkit_bg);
 	}
-	XftDrawSetClipRectangles(_draw_draw, 0, 0, recs_reset, 1);
-	draw_flush(b.x-1, b.y-1, b.w+2, b.h+2);
+	XftDrawSetClipRectangles(c.draw, 0, 0, RECTS_RESET, 1);
+	draw_flush(c,b.x-1, b.y-1, b.w+2, b.h+2);
 }
 
 static void
-draw_combo_box(ComboBox c)
+draw_combo_box(ComboBox comb)
 {
 	int i, count;
 	int xx, yy;
 
-	xx = c.x + c.w - c.h/2;
-	yy = c.y + c.h/2;
+	xx = comb.x + comb.w - comb.h/2;
+	yy = comb.y + comb.h/2;
 
 	/* draw the button for the combo box */
-	draw_rectangle(c.x-1, c.y-1, c.w+2, c.h+2, toolkit_outline);
-	draw_rectangle(c.x-1  , c.y-1,   1, 1, toolkit_outline_corner);
-	draw_rectangle(c.x+c.w, c.y-1,   1, 1, toolkit_outline_corner);
-	draw_rectangle(c.x-1  , c.y+c.h, 1, 1, toolkit_outline_corner);
-	draw_rectangle(c.x+c.w, c.y+c.h, 1, 1, toolkit_outline_corner);
+	draw_rectangle(c,comb.x-1, comb.y-1, comb.w+2, comb.h+2, toolkit_outline);
+	draw_rectangle(c,comb.x-1  , comb.y-1,   1, 1, toolkit_outline_corner);
+	draw_rectangle(c,comb.x+comb.w, comb.y-1,   1, 1, toolkit_outline_corner);
+	draw_rectangle(c,comb.x-1  , comb.y+comb.h, 1, 1, toolkit_outline_corner);
+	draw_rectangle(c,comb.x+comb.w, comb.y+c.h, 1, 1, toolkit_outline_corner);
 
-	if(c.open) {
-		draw_rectangle(c.x, c.y, c.w, c.h, toolkit_shade_dark);
-		draw_rectangle(c.x+2, c.y+2, c.w-2, c.h-2, toolkit_shade_light);
-		draw_rectangle(c.x+2, c.y+2, c.w-3, c.h-3, toolkit_bg);
+	if(comb.open) {
+		draw_rectangle(c,comb.x, comb.y, comb.w, comb.h, toolkit_shade_dark);
+		draw_rectangle(c,comb.x+2, comb.y+2, comb.w-2, comb.h-2, toolkit_shade_light);
+		draw_rectangle(c,comb.x+2, comb.y+2, comb.w-3, comb.h-3, toolkit_bg);
 	} else {
-		draw_rectangle(c.x, c.y, c.w, c.h, toolkit_shade_light);
-		draw_rectangle(c.x+1, c.y+1, c.w-1, c.h-1, toolkit_shade_dark);
-		draw_rectangle(c.x+1, c.y+1, c.w-3, c.h-3, toolkit_bg);
+		draw_rectangle(c,comb.x, comb.y, comb.w, comb.h, toolkit_shade_light);
+		draw_rectangle(c,comb.x+1, comb.y+1, comb.w-1, comb.h-1, toolkit_shade_dark);
+		draw_rectangle(c,comb.x+1, comb.y+1, comb.w-3, comb.h-3, toolkit_bg);
 	}
-	if(c.selected_option) draw_text(c.x+7 + c.open, c.y + c.h/2 + toolkit_font.xftfont->ascent/2-3, toolkit_font, c.options[c.selected_option-1], toolkit_text_color);
-	else draw_text(c.x+7 + c.open, c.y + c.h/2 + toolkit_font.xftfont->ascent/2-3, toolkit_font, c.text, toolkit_text_color);
+	if(comb.selected_option) draw_text(c,comb.x+7 + comb.open, comb.y + comb.h/2 + toolkit_font.xftfont->ascent/2-3, toolkit_font, comb.options[comb.selected_option-1], toolkit_text_color);
+	else draw_text(c,comb.x+7 + comb.open, comb.y + comb.h/2 + toolkit_font.xftfont->ascent/2-3, toolkit_font, comb.text, toolkit_text_color);
 
-	draw_rectangle(xx-5, yy-4, 11, 1, toolkit_text_color);
-	draw_rectangle(xx-4, yy-3, 9,  1, toolkit_text_color);
-	draw_rectangle(xx-3, yy-2, 7,  1, toolkit_text_color);
-	draw_rectangle(xx-2, yy-1, 5,  1, toolkit_text_color);
-	draw_rectangle(xx-1, yy  , 3,  1, toolkit_text_color);
-	draw_rectangle(xx  , yy+1, 1,  1, toolkit_text_color);
+	draw_rectangle(c,xx-5, yy-4, 11, 1, toolkit_text_color);
+	draw_rectangle(c,xx-4, yy-3, 9,  1, toolkit_text_color);
+	draw_rectangle(c,xx-3, yy-2, 7,  1, toolkit_text_color);
+	draw_rectangle(c,xx-2, yy-1, 5,  1, toolkit_text_color);
+	draw_rectangle(c,xx-1, yy  , 3,  1, toolkit_text_color);
+	draw_rectangle(c,xx  , yy+1, 1,  1, toolkit_text_color);
 
 	count = 0;
 	/* draw the options */
-	if(c.open) {
-		for(i = 0; c.options[i]; i++) {
-			draw_rectangle(c.x,   c.y + (c.expand_up ? -i*c.h : i*c.h)   , c.w,   c.h,   toolkit_text_field_bg);
-			if(i == c.selected_option-1)
-				draw_rectangle(c.x+1,   c.y + (c.expand_up ? -i*c.h : i*c.h)  +1 , c.w-2,   c.h-2,   toolkit_selected_bg);
-			draw_text(c.x+3, c.y + c.h/2 + toolkit_font.xftfont->ascent/2-3 + (c.expand_up ? -i*c.h : i*c.h), toolkit_font, c.options[i], toolkit_text_color);
+	if(comb.open) {
+		for(i = 0; comb.options[i]; i++) {
+			draw_rectangle(c,comb.x,   comb.y + (comb.expand_up ? -i*comb.h : i*comb.h)   , comb.w,   comb.h,   toolkit_text_field_bg);
+			if(i == comb.selected_option-1)
+				draw_rectangle(c,comb.x+1,   comb.y + (comb.expand_up ? -i*comb.h : i*comb.h)  +1 , comb.w-2,   comb.h-2,   toolkit_selected_bg);
+			draw_text(c,comb.x+3, comb.y + comb.h/2 + toolkit_font.xftfont->ascent/2-3 + (comb.expand_up ? -i*comb.h : i*comb.h), toolkit_font, comb.options[i], toolkit_text_color);
 			count++;
 		}
-		draw_rectangle(c.x-1, c.y-1 , c.w+2, 1, toolkit_outline);
-		draw_rectangle(c.x-1, c.y+ (c.h*(count)), c.w+2, 1, toolkit_outline);
-		draw_rectangle(c.x-1, c.y-1 , 1, (c.h*(count))+2, toolkit_outline);
-		draw_rectangle(c.x+c.w, c.y-1 , 1, (c.h*(count))+2, toolkit_outline);
+		draw_rectangle(c,comb.x-1, comb.y-1 , comb.w+2, 1, toolkit_outline);
+		draw_rectangle(c,comb.x-1, comb.y+ (comb.h*(count)), comb.w+2, 1, toolkit_outline);
+		draw_rectangle(c,comb.x-1, comb.y-1 , 1, (comb.h*(count))+2, toolkit_outline);
+		draw_rectangle(c,comb.x+comb.w, comb.y-1 , 1, (comb.h*(count))+2, toolkit_outline);
 	}
-	draw_flush(c.x-1, c.y-1, c.w+2, c.h+2 + c.open * (c.h*(count-1)));
+	draw_flush(c,comb.x-1, comb.y-1, comb.w+2, comb.h+2 + comb.open * (comb.h*(count-1)));
 }
 
 void
@@ -294,15 +298,10 @@ toolkit_redraw_widgets()
 void
 toolkit_full_redraw()
 {
-	int w, h;
-
-	w = draw_width();
-	h = draw_height();
-
-	draw_rectangle(0,0,w,h,toolkit_bg);
+	draw_rectangle(c,0,0,c.w,c.h,toolkit_bg);
 
 	toolkit_redraw_widgets();
-	draw_flush_all();
+	draw_flush_all(c);
 }
 
 static void
@@ -312,6 +311,7 @@ call_users_function(void(*fun)())
 
 	if(!fun)return;
 	(*fun)();
+	recalculate_size();
 	/* the content of some widgets has probably changed, recalculate all the
 	 * special parameters! */
 	for(i = 0; i < widget_count; i++) {
@@ -320,6 +320,18 @@ call_users_function(void(*fun)())
 		}
 	}
 	toolkit_redraw_widgets();
+}
+
+static void
+recalculate_size()
+{
+	int i;
+	for(i = 0; i < widget_count; i++) {
+		widgets[i].widget.a->x = widgets[i].widget.a->position.abs.x + widgets[i].widget.a->position.lin.x*c.w;
+		widgets[i].widget.a->y = widgets[i].widget.a->position.abs.y + widgets[i].widget.a->position.lin.y*c.h;
+		widgets[i].widget.a->w = widgets[i].widget.a->size.abs.w     + widgets[i].widget.a->    size.lin.w*c.w;
+		widgets[i].widget.a->h = widgets[i].widget.a->size.abs.h     + widgets[i].widget.a->    size.lin.h*c.h;
+	}
 }
 
 static void*
@@ -335,7 +347,7 @@ _toolkit_thread_func(void* args)
 	TextField* grasped_window;
 	ComboBox* open_combo_box = NULL;
 
-	draw_init(_toolkit_default_width, _toolkit_default_height, _toolkit_default_name,
+	c = draw_init(_toolkit_default_width, _toolkit_default_height, _toolkit_default_name,
 		ExposureMask |
 		PointerMotionMask |
 		ButtonPressMask |
@@ -346,25 +358,26 @@ _toolkit_thread_func(void* args)
 	toolkit_width  = _toolkit_default_width;
 	toolkit_height = _toolkit_default_height;
 
-	toolkit_bg                  = create_color(0xc0,0xc0,0xc0);
-	toolkit_text_color          = create_color(0   ,0   ,0   );
-	toolkit_disabled_text_color = create_color(128 ,128 ,128 );
-	toolkit_shade_light         = create_color(255 ,255 ,255 );
-	toolkit_shade_dark          = create_color(128 ,128 ,128 );
-	toolkit_outline             = create_color(0   ,0   ,0   );
-	toolkit_outline_corner      = create_color(128 ,128 ,128 );
-	toolkit_text_field_bg       = create_color(255 ,255 ,255 );
-	toolkit_selected_bg         = create_color(0x76,0x9e,0xc5);
+	toolkit_bg                  = create_color(c,0xc0,0xc0,0xc0);
+	toolkit_text_color          = create_color(c,0   ,0   ,0   );
+	toolkit_disabled_text_color = create_color(c,128 ,128 ,128 );
+	toolkit_shade_light         = create_color(c,255 ,255 ,255 );
+	toolkit_shade_dark          = create_color(c,128 ,128 ,128 );
+	toolkit_outline             = create_color(c,0   ,0   ,0   );
+	toolkit_outline_corner      = create_color(c,128 ,128 ,128 );
+	toolkit_text_field_bg       = create_color(c,255 ,255 ,255 );
+	toolkit_selected_bg         = create_color(c,0x76,0x9e,0xc5);
 
-	toolkit_font = load_font("Sans-serif:size=11");
+	toolkit_font = load_font(c,"Sans-serif:size=11");
 
 	widgets = malloc(0);
 
 	________toolkit_ready = 1;
 
+
 	for(;;) {
 		meh:
-		if(XPending(_draw_disp)) XNextEvent(_draw_disp, &e);
+		if(XPending(c.disp)) XNextEvent(c.disp, &e);
 		else if(_toolkit_has_to_redraw) {
 			toolkit_full_redraw();
 			_toolkit_has_to_redraw = 0;
@@ -375,9 +388,9 @@ _toolkit_thread_func(void* args)
 		}
 		if(e.type == Expose) {
 			if(e.xexpose.count == 0) {
+				draw_resize(c,e.xexpose.width, e.xexpose.height);
+				recalculate_size();
 				toolkit_full_redraw();
-				/* toolkit_width = draw_width();  */
-				/* toolkit_height = draw_height();*/
 			}
 
 		} else if(e.type == MotionNotify) {
@@ -562,8 +575,9 @@ toolkit_show_button(Button* b)
 		.type = BUTTON,
 		.widget.b = b
 	};
-	widgets[widget_count-1].widget.b->_text_length = draw_string_width(toolkit_font, b->text);
-	toolkit_redraw();
+	widgets[widget_count-1].widget.b->_text_length = draw_string_width(c,toolkit_font, b->text);
+	recalculate_size();
+	toolkit_redraw_widgets();
 }
 
 void
@@ -574,7 +588,8 @@ toolkit_show_label(Label* l)
 		.type = LABEL,
 		.widget.l = l
 	};
-	toolkit_redraw();
+	recalculate_size();
+	toolkit_redraw_widgets();
 }
 
 void
@@ -592,7 +607,8 @@ toolkit_show_text_field(TextField* b)
 		*b->typed_text = 0;
 	}
 	refresh_text_field(b);
-	toolkit_redraw();
+	recalculate_size();
+	toolkit_redraw_widgets();
 }
 
 void
@@ -605,7 +621,8 @@ toolkit_show_combo_box(ComboBox* c)
 		.type = COMBO_BOX,
 		.widget.c = c
 	};
-	toolkit_redraw();
+	recalculate_size();
+	toolkit_redraw_widgets();
 }
 
 int

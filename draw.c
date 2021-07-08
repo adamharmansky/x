@@ -1,131 +1,118 @@
 #include "draw.h"
 
-Display* _draw_disp;
-int _draw_scr;
-Window _draw_win;
-XftDraw* _draw_draw;
-Drawable _draw_drawable;
-GC _draw_gc;
-int _draw_w, _draw_h;
-
-int
+draw_context
 draw_init(int w, int h, char* name, long event_mask) {
-	XSizeHints hint = {
-		.flags = PMinSize|PMaxSize,
-		.min_width = w,
-		.min_height = h,
-		.max_width = w,
-		.max_height = h
-	};
+	draw_context c;
+	// XSizeHints hint = {
+	// 	.flags = PMinSize|PMaxSize,
+	// 	.min_width = w,
+	// 	.min_height = h,
+	// 	.max_width = w,
+	// 	.max_height = h
+	// };
 
-	_draw_w = w;
-	_draw_h = h;
+	c.w = w;
+	c.h = h;
 
 	/* open a display */
-	if ((_draw_disp = XOpenDisplay(NULL)) == NULL) { printf("bruh no diplay\n"); return 1; }
+	if ((c.disp = XOpenDisplay(NULL)) == NULL) { printf("bruh no diplay\n"); exit(1); }
 	/* screen */
-	_draw_scr = DefaultScreen(_draw_disp);
+	c.scr = DefaultScreen(c.disp);
 	/* window */
-	_draw_win = XCreateSimpleWindow(_draw_disp, RootWindow(_draw_disp, _draw_scr), 10, 10, w, h, 1, WhitePixel(_draw_disp, _draw_scr), BlackPixel(_draw_disp, _draw_scr));
+	c.win = XCreateSimpleWindow(c.disp, RootWindow(c.disp, c.scr), 10, 10, w, h, 1, WhitePixel(c.disp, c.scr), BlackPixel(c.disp, c.scr));
 	/* create a drawable to draw into ( We won't be drawing directly into our window) */
-	_draw_drawable = XCreatePixmap(_draw_disp, _draw_win, w, h, DefaultDepth(_draw_disp, _draw_scr));
+	c.drawable = XCreatePixmap(c.disp, c.win, w, h, DefaultDepth(c.disp, c.scr));
 
 	/* select input from the specified event mask */
-	XSelectInput(_draw_disp, _draw_win, event_mask);
+	XSelectInput(c.disp, c.win, event_mask);
 	/* finally, map the window */
-	XMapWindow(_draw_disp, _draw_win);
+	XMapWindow(c.disp, c.win);
 
 	/* more drawing intialization */
-	_draw_draw  = XftDrawCreate  (_draw_disp, _draw_drawable, DefaultVisual(_draw_disp, _draw_scr), DefaultColormap(_draw_disp, _draw_scr));
-	_draw_gc = XCreateGC(_draw_disp, _draw_win, 0, NULL);
+	c.gc = XCreateGC(c.disp, c.win, 0, NULL);
+	c.draw  =  XftDrawCreate(c.disp, c.drawable, DefaultVisual(c.disp, c.scr), DefaultColormap(c.disp, c.scr));
 
 	/* window properties */
-	XStoreName(_draw_disp, _draw_win, name);
-	XSetWMNormalHints(_draw_disp, _draw_win, &hint);
+	XStoreName(c.disp, c.win, name);
+	// XSetWMNormalHints(c.disp, c.win, &hint);
+	return c;
 }
 
 int
-draw_rectangle(int x, int y, int w, int h, color_t col)
+draw_rectangle(draw_context c, int x, int y, int w, int h, color_t col)
 {
-	XftDrawRect(_draw_draw, &col.xftcolor, x, y, w, h);
+	XftDrawRect(c.draw, &col.xftcolor, x, y, w, h);
 }
 
-int draw_text(int x, int y, font_t f, char* s, color_t c)
+int draw_text(draw_context c, int x, int y, font_t f, char* s, color_t col)
 {
-	XftDrawStringUtf8(_draw_draw, &c.xftcolor, f.xftfont, x, y, s, strlen(s));
+	XftDrawStringUtf8(c.draw, &col.xftcolor, f.xftfont, x, y, s, strlen(s));
 }
 
 void
-draw_char(int x, int y, font_t f, char c, color_t col)
+draw_char(draw_context c, int x, int y, font_t f, char ch, color_t col)
 {
-	if(c != ' ' && c != '\t')XftDrawString8(_draw_draw, &col.xftcolor, f.xftfont, x, y, &c, 1);
+	if(ch != ' ' && ch != '\t')XftDrawString8(c.draw, &col.xftcolor, f.xftfont, x, y, &ch, 1);
 }
 
 int
-draw_char_width(font_t f, char c)
+draw_char_width(draw_context c, font_t f, char ch)
 {
 	XGlyphInfo ext;
-	XftTextExtents8(_draw_disp, f.xftfont, &c, 1, &ext);
+	XftTextExtents8(c.disp, f.xftfont, &ch, 1, &ext);
 	return ext.xOff;
 }
 
 int
-draw_string_width(font_t f, char* c)
+draw_string_width(draw_context c, font_t f, char* s)
 {
 	XGlyphInfo ext;
-	XftTextExtentsUtf8(_draw_disp, f.xftfont, c, strlen(c), &ext);
+	XftTextExtentsUtf8(c.disp, f.xftfont, s, strlen(s), &ext);
 	return ext.xOff;
 }
 
 font_t
-load_font(char* name)
+load_font(draw_context c, char* name)
 {
 	font_t f;
-	f.xftfont = XftFontOpenName(_draw_disp, _draw_scr, name);
+	f.xftfont = XftFontOpenName(c.disp, c.scr, name);
 }
 
-int
-draw_width()
-{
-	int ww; int junk[20];
-	XGetGeometry(_draw_disp, _draw_win,
-			(Window*)junk, junk, junk, &ww, junk, junk, junk);
-	return ww;
-}
 
 int
-draw_height()
-{
-	int wh; int junk[20];
-	XGetGeometry(_draw_disp, _draw_win,
-			(Window*)junk, junk, junk, junk, &wh, junk, junk);
-	return wh;
-}
-
-int
-draw_expose()
+draw_expose(draw_context c)
 {
 	static XExposeEvent ev = {.type=Expose, .count=0};
-	XSendEvent(_draw_disp, _draw_win, 0, ExposureMask, (XEvent*)&ev);
+	XSendEvent(c.disp, c.win, 0, ExposureMask, (XEvent*)&ev);
 }
 
 color_t
-create_color(char r, char g, char b)
+create_color(draw_context c, char r, char g, char b)
 {
 	XRenderColor d = {.red = r<<8, .green = g<<8, .blue = b<<8, .alpha = 255<<8};
-	color_t c;
-	XftColorAllocValue(_draw_disp, DefaultVisual(_draw_disp, _draw_scr), DefaultColormap(_draw_disp, _draw_scr), &d, &c.xftcolor);
-	return c;
+	color_t col;
+	XftColorAllocValue(c.disp, DefaultVisual(c.disp, c.scr), DefaultColormap(c.disp, c.scr), &d, &col.xftcolor);
+	return col;
 }
 
 void
-draw_flush_all()
+draw_flush_all(draw_context c)
 {
-	XCopyArea(_draw_disp, _draw_drawable, _draw_win, _draw_gc, 0,0,_draw_w, _draw_h, 0,0);
+	XCopyArea(c.disp, c.drawable, c.win, c.gc, 0,0,c.w, c.h, 0,0);
 }
 
 void
-draw_flush(int x, int y, int w, int h)
+draw_flush(draw_context c, int x, int y, int w, int h)
 {
-	XCopyArea(_draw_disp, _draw_drawable, _draw_win, _draw_gc, x,y,w,h,x,y);
+	XCopyArea(c.disp, c.drawable, c.win, c.gc, x,y,w,h,x,y);
+}
+
+void
+draw_resize(draw_context c, int w, int h)
+{
+	XFreePixmap(c.disp, c.drawable);
+	c.drawable = XCreatePixmap(c.disp, c.win, w, h, DefaultDepth(c.disp, c.scr));
+	c.w = w;
+	c.h = h;
+	XftDrawChange(c.draw, c.drawable);
 }

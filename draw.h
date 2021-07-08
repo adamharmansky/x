@@ -6,6 +6,7 @@
 #include <X11/Xft/Xft.h>
 #include <pthread.h>
 #include <string.h>
+
 typedef struct {
 	XftColor xftcolor;
 } color_t;
@@ -13,22 +14,25 @@ typedef struct {
 	XftFont* xftfont;
 } font_t;
 
-extern Display* _draw_disp;
-extern int _draw_scr;
-extern Window _draw_win;
-extern XftDraw* _draw_draw;
+typedef struct {
+	Display* disp;
+	int scr;
+	Window win;
+	XftDraw* draw;
+	Drawable drawable;
+	GC gc;
+	int w, h;
+} draw_context;
 
-extern int draw_init(int, int, char*, long);
-extern int draw_rectangle(int, int, int, int, color_t);
-extern int draw_text(int, int, font_t, char*, color_t);
-extern void draw_char(int, int, font_t, char, color_t);
-extern color_t create_color(char, char, char);
-extern font_t  load_font(char* name);
-extern int draw_height();
-extern int draw_width();
-extern int draw_expose();
-extern int draw_char_width(font_t f, char c);
-extern int draw_string_width(font_t f, char* c);
-extern void draw_flush_all();
-extern void draw_flush(int x, int y, int w, int h);
+extern draw_context draw_init(int, int, char*, long);
+extern int draw_rectangle(draw_context,int, int, int, int, color_t);
+extern int draw_text(draw_context,int, int, font_t, char*, color_t);
+extern void draw_char(draw_context,int, int, font_t, char, color_t);
+extern color_t create_color(draw_context,char, char, char);
+extern font_t  load_font(draw_context,char* name);
+extern int draw_char_width(draw_context,font_t f, char c);
+extern int draw_string_width(draw_context,font_t f, char* c);
+extern void draw_flush_all(draw_context);
+extern void draw_flush(draw_context,int x, int y, int w, int h);
+extern void draw_resize(draw_context,int w, int h);
 #endif
