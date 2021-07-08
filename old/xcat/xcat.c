@@ -76,7 +76,7 @@ main(int argc, char** argv)
 	int old_w, old_h;
 	FILE* file;
 
-	draw_init(800,600,"this is a test");
+	draw_init(800,600,"this is a test", ButtonPressMask | KeyPressMask | ExposureMask);
 	bg_1  = create_color(0x30,0x32,0x36);
 	bg_2  = create_color(0x36,0x38,0x3e);
 	fg  = create_color(255,255,255);
