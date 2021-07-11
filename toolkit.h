@@ -39,6 +39,7 @@ typedef struct {
 	/* DO NOT USE, these are recalculated when the windows recieves an Expose event: */
 	int x, y;
 	int w, h;
+
 	char* text;
 	int _text_length;
 } Label;
@@ -58,6 +59,7 @@ typedef struct {
 	/* DO NOT USE, these are recalculated when the windows recieves an Expose event: */
 	int x, y;
 	int w, h;
+
 	char* text;
 	int _text_length;
 	char pressed;
@@ -81,6 +83,7 @@ typedef struct {
 	/* DO NOT USE, these are recalculated when the windows recieves an Expose event: */
 	int x, y;
 	int w, h;
+
 	char* text;
 	int _text_length;
 	char* typed_text;
@@ -91,7 +94,7 @@ typedef struct {
 	int scroll;
 	int max_scroll;
 	int cursor_position;
-	int cursor_y;
+	int cursor_x, cursor_y;
 } TextField;
 
 typedef struct {
@@ -109,6 +112,7 @@ typedef struct {
 	/* DO NOT USE, these are recalculated when the windows recieves an Expose event: */
 	int x, y;
 	int w, h;
+
 	char* text;
 	int _text_length;
 	void (*on_select_option)();

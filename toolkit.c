@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <poll.h>
 #include "toolkit.h"
 
 #define SCROLL_AMOUNT 20
@@ -30,12 +31,11 @@ refresh_text_field(TWindow* tw,TextField* t)
 	if(t->scrollable) {
 		text = (t->input && *t->typed_text) ? t->typed_text : t->text;
 		x = 3;
-		y = 3 + tw->font.xftfont->ascent;
-		x_limit = t->w - 3 - t->scrollable*16;
+		y = tw->font.xftfont->ascent;
+		x_limit = t->w - 3 - t->scrollable*16 - draw_char_width(tw->c,tw->font, 'n');
 
-		if(0 == t->cursor_position) t->cursor_y = y;
+		if(0 == t->cursor_position) {t->cursor_y = y; t->cursor_x = x;}
 		for(i = 0; text[i]; i++) {
-			if(i+1 == t->cursor_position) t->cursor_y = y;
 			if(text[i] == '\n' || x >= x_limit) {
 				x = 3;
 				y += tw->font.xftfont->height;
@@ -44,11 +44,55 @@ refresh_text_field(TWindow* tw,TextField* t)
 			} else {
 				x += draw_char_width(tw->c,tw->font, text[i]);
 			}
+			if(i+1 == t->cursor_position) {t->cursor_y = y; t->cursor_x = x;}
 		}
 		t->max_scroll = y-tw->font.xftfont->ascent;
 	}
 	if(t->scroll < 0) t->scroll = 0;
 	if(t->scroll > t->max_scroll) t->scroll = t->max_scroll;
+}
+
+static void
+text_field_find_click(TWindow* tw, TextField* t, int pointer_x, int pointer_y)
+{
+	int x;
+	int y;
+	int i;
+	int x_limit;
+	char* text;
+
+	t->_text_length = draw_string_width(tw->c,tw->font, t->text);
+
+	
+	text = t->typed_text;
+	x = 3;
+	y = tw->font.xftfont->ascent - t->scroll;
+	x_limit = t->w - 3 - t->scrollable*16 - draw_char_width(tw->c,tw->font, 'n');
+
+	if(0 == t->cursor_position) t->cursor_y = y;
+	for(i = 0; text[i] && y < pointer_y-t->y; i++) {
+		if(text[i] == '\n' || x >= x_limit) {
+			x = 3;
+			y += tw->font.xftfont->height;
+		} else if(text[i] == '\t') {
+			x += 24;
+		} else {
+			x += draw_char_width(tw->c,tw->font, text[i]);
+		}
+	}
+	for(; text[i] && x < pointer_x - t->x; i++) {
+		if(text[i] == '\n' || x >= x_limit || !text[i+1]) {
+			t->cursor_position = !text[i+1]?i+1:i;
+			t->cursor_y = y; t->cursor_x = x;
+			return;
+		} else if(text[i] == '\t') {
+			x += 24;
+		} else {
+			x += draw_char_width(tw->c,tw->font, text[i]);
+		}
+	}
+	t->cursor_position = text[i]?i-1<0?0:i-1:i;
+	t->cursor_y = y; t->cursor_x = x;
 }
 
 static void
@@ -280,6 +324,7 @@ redraw_widgets(TWindow* tw)
 static void
 full_redraw(TWindow* tw)
 {
+	fprintf(stderr, "redrawing\n");
 	draw_rectangle(tw->c,0,0,tw->c.w,tw->c.h,tw->bg);
 
 	redraw_widgets(tw);
@@ -329,7 +374,9 @@ _toolkit_thread_func(void* args)
 	TextField* grasped_window;
 	ComboBox* open_combo_box = NULL;
 	TWindow* tw = _i_am_too_lazy_to_do_arguments_right;
+	struct pollfd fds;
 
+	fprintf(stderr, "entered main thread\n");
 	tw->c = draw_init(tw->default_width, tw->default_height, tw->default_name,
 		ExposureMask |
 		PointerMotionMask |
@@ -337,13 +384,16 @@ _toolkit_thread_func(void* args)
 		ButtonReleaseMask |
 		KeyPressMask |
 		Button1MotionMask |
+		StructureNotifyMask |
 		KeyReleaseMask);
+	fds = (struct pollfd){.fd=ConnectionNumber(tw->c.disp), .events = POLLIN};
 	Atom stop_atom = XInternAtom(tw->c.disp, "WM_DELETE_WINDOW", False);
 	XSetWMProtocols(tw->c.disp, tw->c.win, &stop_atom, 1);
 	tw->width  = tw->default_width;
 	tw->height = tw->default_height;
 
 	tw->bg                  = create_color(tw->c,0xc0,0xc0,0xc0);
+	XSetWindowBackground(tw->c.disp, tw->c.win, tw->bg.xftcolor.pixel);
 	tw->text_color          = create_color(tw->c,0   ,0   ,0   );
 	tw->disabled_text_color = create_color(tw->c,128 ,128 ,128 );
 	tw->shade_light         = create_color(tw->c,255 ,255 ,255 );
@@ -358,202 +408,217 @@ _toolkit_thread_func(void* args)
 
 	toolkit_running++;
 	tw->ready = 1;
-
+	fprintf(stderr, "main thread ready\n");
 
 	for(;;) {
-		meh:
-		if(XPending(tw->c.disp)) XNextEvent(tw->c.disp, &e);
-		else if(tw->has_to_redraw) {
-			full_redraw(tw);
-			tw->has_to_redraw = 0;
-		}
-		else {
-			usleep(30000);
-			goto meh;
-		}
-		if(e.type == Expose) {
-			if(e.xexpose.count == 0) {
-				draw_resize(&tw->c,draw_width(tw->c), draw_height(tw->c));
-				recalculate_size(tw);
+		if(!poll(&fds,1,100)) {
+			if(tw->has_to_redraw) {
 				full_redraw(tw);
+				XFlush(tw->c.disp);
+				tw->has_to_redraw =0;
 			}
-		} else if(e.type == MotionNotify) {
-			tw->pointer_x = e.xmotion.x;
-			tw->pointer_y = e.xmotion.y;
-			/* this part of code scrolls text fields when we're dragging the
-			 * scroll handle thing */
-			if(e.xmotion.state & Button1Mask) {
-				for(i = 0; i < tw->widget_count; i++) {
-					if(tw->widgets[i].type == TEXT_FIELD) {
-						if(tw->widgets[i].widget.t->scrollable && grasp && grasped_window == tw->widgets[i].widget.t) {
+			continue;
+		}
+		while(XPending(tw->c.disp)) {
+			XNextEvent(tw->c.disp, &e);
+			if(e.type == ConfigureNotify) {
+				if(!e.xconfigure.send_event) {
+					fprintf(stderr, "resizing\n");
+					draw_flush_all(tw->c);
+					draw_resize(&tw->c,draw_width(tw->c), draw_height(tw->c));
+					recalculate_size(tw);
+				}
+			}else if(e.type == Expose){
+				if(!e.xexpose.count) full_redraw(tw);
+			} else if(e.type == MotionNotify) {
+				tw->pointer_x = e.xmotion.x;
+				tw->pointer_y = e.xmotion.y;
+				/* this part of code scrolls text fields when we're dragging the
+				 * scroll handle thing */
+				if(e.xmotion.state & Button1Mask) {
+					for(i = 0; i < tw->widget_count; i++) {
+						if(tw->widgets[i].type == TEXT_FIELD) {
+							if(tw->widgets[i].widget.t->scrollable && grasp && grasped_window == tw->widgets[i].widget.t) {
 								tw->widgets[i].widget.t->scroll = (tw->pointer_y - grasp - tw->widgets[i].widget.t->y)*(tw->widgets[i].widget.t->max_scroll+1)/(tw->widgets[i].widget.t->h-50);
 								tw->widgets[i].widget.t->scroll = tw->widgets[i].widget.t->scroll < 0 ? 0 : tw->widgets[i].widget.t->scroll;
 								tw->widgets[i].widget.t->scroll = tw->widgets[i].widget.t->scroll > tw->widgets[i].widget.t->max_scroll ? tw->widgets[i].widget.t->max_scroll : tw->widgets[i].widget.t->scroll;
 								draw_text_field(tw,*tw->widgets[i].widget.t);
-						}
-					}
-				}
-			}
-			/* if there is a combo box open, see which option is selected */
-			if(open_combo_box) {
-				for(j = 0; open_combo_box->options[j]; j++) {
-					if(tw->pointer_x >= open_combo_box->x && tw->pointer_y >= open_combo_box->y + j*open_combo_box->h && tw->pointer_y <= open_combo_box->y + open_combo_box->h * (j+1) && tw->pointer_x <= open_combo_box->x + open_combo_box->w) {
-						open_combo_box->selected_option = j+1;
-						draw_combo_box(tw,*open_combo_box);
-					}
-				}
-			}
-		/* if a mouse button is pressed */
-		} else if(e.type == ButtonPress) {
-			tw->pointer_down = 1;
-
-			/* for every widget */
-			for(i = 0;i < tw->widget_count;i++) {
-
-				/* if clicked, deselect all text fields
-				 * if we click on the same field, it will
-				 * get selected later in this cycle */
-				if(tw->widgets[i].type == TEXT_FIELD){
-					if(tw->widgets[i].widget.t->selected && e.xbutton.button == 1) {
-						tw->widgets[i].widget.t->selected = 0;
-						draw_text_field(tw,*tw->widgets[i].widget.t);
-					}
-				/* the same for combo boxes, except that we
-				 * don't want to select anything back, so just
-				 * say we're done with this event*/
-				} else if(tw->widgets[i].type == COMBO_BOX) {
-					if(tw->widgets[i].widget.c->open) {
-						tw->widgets[i].widget.c->open = 0;
-						open_combo_box = NULL;
-						call_users_function(tw,tw->widgets[i].widget.c->on_select_option);
-						full_redraw(tw);
-						goto meh;
-					}
-				}
-
-
-				/* if we click on a widget */
-				if(tw->pointer_x >= tw->widgets[i].widget.b->x && tw->pointer_x <= tw->widgets[i].widget.b->x + tw->widgets[i].widget.b->w && tw->pointer_y >= tw->widgets[i].widget.b->y && tw->pointer_y <= tw->widgets[i].widget.b->y+tw->widgets[i].widget.b->h) {
-
-
-					/* if we click on a button */
-					if(tw->widgets[i].type == BUTTON) {
-						/* we need to see if we have changed it's state */
-						old = tw->widgets[i].widget.b->pressed;
-						if(tw->widgets[i].widget.b->toggle) tw->widgets[i].widget.b->pressed = !tw->widgets[i].widget.b->pressed;
-						else tw->widgets[i].widget.b->pressed = 1;
-						/* it the button's state has changed form 0 to 1, call on_press */
-						if(tw->widgets[i].widget.b->pressed && !old) call_users_function(tw,tw->widgets[i].widget.b->on_press);
-						/* if a toggle button is released */
-						if(!tw->widgets[i].widget.b->pressed && old) call_users_function(tw,tw->widgets[i].widget.b->on_release);
-						/* draw the button because it's state has changed */
-						draw_button(tw,*tw->widgets[i].widget.b);
-
-
-					/* if we click on a text field */
-					} else if (tw->widgets[i].type == TEXT_FIELD) {
-						if(tw->widgets[i].widget.t->scrollable && e.xbutton.button == 1) {
-							/* if we click on the scroll hanle thingy on the right */
-							if(tw->pointer_x >= tw->widgets[i].widget.t->x+tw->widgets[i].widget.t->w-15 && tw->pointer_y >= tw->widgets[i].widget.t->y+tw->widgets[i].widget.t->scroll*(tw->widgets[i].widget.t->h-50)/(tw->widgets[i].widget.t->max_scroll+1) && tw->pointer_x <= tw->widgets[i].widget.t->x+tw->widgets[i].widget.t->w && tw->pointer_y <= tw->widgets[i].widget.t->y+tw->widgets[i].widget.t->scroll*(tw->widgets[i].widget.t->h-50)/(tw->widgets[i].widget.t->max_scroll+1)+50) {
-								/* calculate the relative position of the scroll handle to the pinter */
-								grasp = tw->pointer_y -( tw->widgets[i].widget.t->y+tw->widgets[i].widget.t->scroll*(tw->widgets[i].widget.t->h-50)/(tw->widgets[i].widget.t->max_scroll+1));
-								grasped_window = tw->widgets[i].widget.t;
 							}
 						}
+					}
+				}
+				/* if there is a combo box open, see which option is selected */
+				if(open_combo_box) {
+					for(j = 0; open_combo_box->options[j]; j++) {
+						if(tw->pointer_x >= open_combo_box->x && tw->pointer_y >= open_combo_box->y + j*open_combo_box->h && tw->pointer_y <= open_combo_box->y + open_combo_box->h * (j+1) && tw->pointer_x <= open_combo_box->x + open_combo_box->w) {
+							open_combo_box->selected_option = j+1;
+							draw_combo_box(tw,*open_combo_box);
+						}
+					}
+				}
+			/* if a mouse button is pressed */
+			} else if(e.type == ButtonPress) {
+				tw->pointer_down = 1;
 
-						/* select an input field if we click on it */
-						if(tw->widgets[i].widget.t->input && e.xbutton.button == 1) {
-							tw->widgets[i].widget.t->selected = 1;
+				/* for every widget */
+				for(i = 0;i < tw->widget_count;i++) {
+					/* if clicked, deselect all text fields
+					 * if we click on the same field, it will
+					 * get selected later in this cycle */
+					if(tw->widgets[i].type == TEXT_FIELD){
+						if(tw->widgets[i].widget.t->selected && e.xbutton.button == 1) {
+							tw->widgets[i].widget.t->selected = 0;
 							draw_text_field(tw,*tw->widgets[i].widget.t);
 						}
-
-						/* scroll a field with buttons 4 and 5 */
-						if(tw->widgets[i].widget.t->scrollable) {
-							if(e.xbutton.button == 4 && tw->widgets[i].widget.t->scroll >= SCROLL_AMOUNT) {
-								tw->widgets[i].widget.t->scroll-=SCROLL_AMOUNT;
-								draw_text_field(tw,*tw->widgets[i].widget.t);
-							} else if(e.xbutton.button == 5 && tw->widgets[i].widget.t->scroll <= tw->widgets[i].widget.t->max_scroll-SCROLL_AMOUNT) {
-								tw->widgets[i].widget.t->scroll+=SCROLL_AMOUNT;
-								draw_text_field(tw,*tw->widgets[i].widget.t);
-							}
-						}
+					/* the same for combo boxes, except that we
+					 * don't want to select anything back, so just
+					 * say we're done with this event*/
 					} else if(tw->widgets[i].type == COMBO_BOX) {
-						/* selecting a combo box */
-						if(e.xbutton.button == 1) {
-							tw->widgets[i].widget.c->open = 1;
-							open_combo_box = tw->widgets[i].widget.c;
-						} else if(e.xbutton.button == 4 && tw->widgets[i].widget.c->selected_option > 1) {
-							tw->widgets[i].widget.c->selected_option--;
+						if(tw->widgets[i].widget.c->open) {
+							tw->widgets[i].widget.c->open = 0;
+							open_combo_box = NULL;
 							call_users_function(tw,tw->widgets[i].widget.c->on_select_option);
-						} else if(e.xbutton.button == 5 && tw->widgets[i].widget.c->options[tw->widgets[i].widget.c->selected_option]) {
-							tw->widgets[i].widget.c->selected_option++;
-							call_users_function(tw,tw->widgets[i].widget.c->on_select_option);
+							full_redraw(tw);
+							continue;
 						}
-						draw_combo_box(tw,*tw->widgets[i].widget.c);
 					}
-				}
-			}
-		} else if(e.type == ButtonRelease) {
-			tw->pointer_down = 0;
-			grasp = 0;
-			/* deselect every button */
-			for(i = 0;i < tw->widget_count;i++) {
-				if(tw->widgets[i].type == BUTTON) {
-					if(!tw->widgets[i].widget.b->toggle) {
-						if(tw->widgets[i].widget.b->pressed) {
-							tw->widgets[i].widget.b->pressed = 0;
+
+
+					/* if we click on a widget */
+					if(tw->pointer_x >= tw->widgets[i].widget.b->x && tw->pointer_x <= tw->widgets[i].widget.b->x + tw->widgets[i].widget.b->w && tw->pointer_y >= tw->widgets[i].widget.b->y && tw->pointer_y <= tw->widgets[i].widget.b->y+tw->widgets[i].widget.b->h) {
+
+
+						/* if we click on a button */
+						if(tw->widgets[i].type == BUTTON) {
+							/* we need to see if we have changed it's state */
+							old = tw->widgets[i].widget.b->pressed;
+							if(tw->widgets[i].widget.b->toggle) tw->widgets[i].widget.b->pressed = !tw->widgets[i].widget.b->pressed;
+							else tw->widgets[i].widget.b->pressed = 1;
+							/* it the button's state has changed form 0 to 1, call on_press */
+							if(tw->widgets[i].widget.b->pressed && !old) call_users_function(tw,tw->widgets[i].widget.b->on_press);
+							/* if a toggle button is released */
+							if(!tw->widgets[i].widget.b->pressed && old) call_users_function(tw,tw->widgets[i].widget.b->on_release);
+							/* draw the button because it's state has changed */
 							draw_button(tw,*tw->widgets[i].widget.b);
-							call_users_function(tw,tw->widgets[i].widget.b->on_release);
-						}
-					}
-				}
-			}
-		} else if(e.type == KeyPress) {
-			/* typing into input fields */
-			XLookupString(&e.xkey, s, 64, &k, NULL);
-			for(i = 0; i < tw->widget_count; i++) {
-				if(tw->widgets[i].type == TEXT_FIELD) {
-					if(tw->widgets[i].widget.t->input && tw->widgets[i].widget.t->selected){
-						/* for one-byte characters */
-						if(!s[1] && *s) {
-							l = strlen(tw->widgets[i].widget.t->typed_text);
-							if(k == XK_BackSpace ) {
-								if(tw->widgets[i].widget.t->cursor_position) {
-									memmove(tw->widgets[i].widget.t->typed_text+tw->widgets[i].widget.t->cursor_position-1, tw->widgets[i].widget.t->typed_text+tw->widgets[i].widget.t->cursor_position, l-tw->widgets[i].widget.t->cursor_position);
-									tw->widgets[i].widget.t->typed_text = realloc(tw->widgets[i].widget.t->typed_text, l);
-									tw->widgets[i].widget.t->typed_text[l-1] = 0;
-									tw->widgets[i].widget.t->cursor_position--;
+
+
+						/* if we click on a text field */
+						} else if (tw->widgets[i].type == TEXT_FIELD) {
+							if(tw->widgets[i].widget.t->scrollable && e.xbutton.button == 1) {
+								/* if we click on the scroll hanle thingy on the right */
+								if(tw->pointer_x >= tw->widgets[i].widget.t->x+tw->widgets[i].widget.t->w-15 && tw->pointer_y >= tw->widgets[i].widget.t->y+tw->widgets[i].widget.t->scroll*(tw->widgets[i].widget.t->h-50)/(tw->widgets[i].widget.t->max_scroll+1) && tw->pointer_x <= tw->widgets[i].widget.t->x+tw->widgets[i].widget.t->w && tw->pointer_y <= tw->widgets[i].widget.t->y+tw->widgets[i].widget.t->scroll*(tw->widgets[i].widget.t->h-50)/(tw->widgets[i].widget.t->max_scroll+1)+50) {
+									/* calculate the relative position of the scroll handle to the pinter */
+									grasp = tw->pointer_y -( tw->widgets[i].widget.t->y+tw->widgets[i].widget.t->scroll*(tw->widgets[i].widget.t->h-50)/(tw->widgets[i].widget.t->max_scroll+1));
+									grasped_window = tw->widgets[i].widget.t;
 								}
-							} else {
-								if(*s == 0x0d) *s = '\n';
-								tw->widgets[i].widget.t->typed_text = realloc(tw->widgets[i].widget.t->typed_text, l+2);
-								memmove(
-									&tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position+1],
-									&tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position],
-									l-tw->widgets[i].widget.t->cursor_position+1);
-								tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position] = *s;
-								tw->widgets[i].widget.t->cursor_position++;
+								else {
+									text_field_find_click(tw, tw->widgets[i].widget.t, tw->pointer_x, tw->pointer_y);
+								}
 							}
-						} else if (k == XK_Left) {
-							if(tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position-1])
-								tw->widgets[i].widget.t->cursor_position--;
-						} else if (k == XK_Right) {
-							if(tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position])
-								tw->widgets[i].widget.t->cursor_position++;
+
+							/* select an input field if we click on it */
+							if(tw->widgets[i].widget.t->input && e.xbutton.button == 1) {
+								tw->widgets[i].widget.t->selected = 1;
+								draw_text_field(tw,*tw->widgets[i].widget.t);
+							}
+
+							/* scroll a field with buttons 4 and 5 */
+							if(tw->widgets[i].widget.t->scrollable) {
+								if(e.xbutton.button == 4 && tw->widgets[i].widget.t->scroll >= SCROLL_AMOUNT) {
+									tw->widgets[i].widget.t->scroll-=SCROLL_AMOUNT;
+									draw_text_field(tw,*tw->widgets[i].widget.t);
+								} else if(e.xbutton.button == 5 && tw->widgets[i].widget.t->scroll <= tw->widgets[i].widget.t->max_scroll-SCROLL_AMOUNT) {
+									tw->widgets[i].widget.t->scroll+=SCROLL_AMOUNT;
+									draw_text_field(tw,*tw->widgets[i].widget.t);
+								}
+							}
+						} else if(tw->widgets[i].type == COMBO_BOX) {
+							/* selecting a combo box */
+							if(e.xbutton.button == 1) {
+								tw->widgets[i].widget.c->open = 1;
+								open_combo_box = tw->widgets[i].widget.c;
+							} else if(e.xbutton.button == 4 && tw->widgets[i].widget.c->selected_option > 1) {
+								tw->widgets[i].widget.c->selected_option--;
+								call_users_function(tw,tw->widgets[i].widget.c->on_select_option);
+							} else if(e.xbutton.button == 5 && tw->widgets[i].widget.c->options[tw->widgets[i].widget.c->selected_option]) {
+								tw->widgets[i].widget.c->selected_option++;
+								call_users_function(tw,tw->widgets[i].widget.c->on_select_option);
+							}
+							draw_combo_box(tw,*tw->widgets[i].widget.c);
 						}
-						refresh_text_field(tw, tw->widgets[i].widget.t);
-						if(tw->widgets[i].widget.t->scrollable && tw->widgets[i].widget.t->cursor_y - tw->widgets[i].widget.t->scroll > tw->widgets[i].widget.t->h) {
-							tw->widgets[i].widget.t->scroll+=tw->font.xftfont->height;
-						}
-						call_users_function(tw,tw->widgets[i].widget.t->on_content_changed);
-						draw_text_field(tw,*tw->widgets[i].widget.t);
 					}
 				}
+			} else if(e.type == ButtonRelease) {
+				tw->pointer_down = 0;
+				grasp = 0;
+				/* deselect every button */
+				for(i = 0;i < tw->widget_count;i++) {
+					if(tw->widgets[i].type == BUTTON) {
+						if(!tw->widgets[i].widget.b->toggle) {
+							if(tw->widgets[i].widget.b->pressed) {
+								tw->widgets[i].widget.b->pressed = 0;
+								draw_button(tw,*tw->widgets[i].widget.b);
+								call_users_function(tw,tw->widgets[i].widget.b->on_release);
+							}
+						}
+					}
+				}
+			} else if(e.type == KeyPress) {
+				/* typing into input fields */
+				XLookupString(&e.xkey, s, 64, &k, NULL);
+				for(i = 0; i < tw->widget_count; i++) {
+					if(tw->widgets[i].type == TEXT_FIELD) {
+						if(tw->widgets[i].widget.t->input && tw->widgets[i].widget.t->selected){
+							/* for one-byte characters */
+							if(!s[1] && *s) {
+								l = strlen(tw->widgets[i].widget.t->typed_text);
+								if(k == XK_BackSpace ) {
+									if(tw->widgets[i].widget.t->cursor_position) {
+										memmove(tw->widgets[i].widget.t->typed_text+tw->widgets[i].widget.t->cursor_position-1, tw->widgets[i].widget.t->typed_text+tw->widgets[i].widget.t->cursor_position, l-tw->widgets[i].widget.t->cursor_position);
+										tw->widgets[i].widget.t->typed_text = realloc(tw->widgets[i].widget.t->typed_text, l);
+										tw->widgets[i].widget.t->typed_text[l-1] = 0;
+										tw->widgets[i].widget.t->cursor_position--;
+									}
+								} else {
+									if(*s == 0x0d) *s = '\n';
+									tw->widgets[i].widget.t->typed_text = realloc(tw->widgets[i].widget.t->typed_text, l+2);
+									memmove(
+										&tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position+1],
+										&tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position],
+										l-tw->widgets[i].widget.t->cursor_position+1);
+									tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position] = *s;
+									tw->widgets[i].widget.t->cursor_position++;
+								}
+							} else if (k == XK_Left) {
+								if(tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position-1])
+									tw->widgets[i].widget.t->cursor_position--;
+							} else if (k == XK_Right) {
+								if(tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position])
+									tw->widgets[i].widget.t->cursor_position++;
+							} else if (k == XK_Up) {
+									text_field_find_click(tw, tw->widgets[i].widget.t, tw->widgets[i].widget.t->cursor_x+tw->widgets[i].widget.t->x + draw_char_width(tw->c, tw->font, tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position])/2, tw->widgets[i].widget.t->cursor_y+tw->widgets[i].widget.t->y-tw->font.xftfont->height-tw->widgets[i].widget.t->scroll);
+							} else if (k == XK_Down) {
+									text_field_find_click(tw, tw->widgets[i].widget.t, tw->widgets[i].widget.t->cursor_x+tw->widgets[i].widget.t->x + draw_char_width(tw->c, tw->font, tw->widgets[i].widget.t->typed_text[tw->widgets[i].widget.t->cursor_position])/2, tw->widgets[i].widget.t->cursor_y+tw->widgets[i].widget.t->y+tw->font.xftfont->height-tw->widgets[i].widget.t->scroll);
+							}
+							refresh_text_field(tw, tw->widgets[i].widget.t);
+							if(tw->widgets[i].widget.t->scrollable) {
+								if(tw->widgets[i].widget.t->cursor_y - tw->widgets[i].widget.t->scroll > tw->widgets[i].widget.t->h) {
+									tw->widgets[i].widget.t->scroll = tw->widgets[i].widget.t->cursor_y - tw->widgets[i].widget.t->h+tw->font.xftfont->descent;
+								} else if(tw->widgets[i].widget.t->cursor_y < tw->widgets[i].widget.t->scroll + tw->font.xftfont->ascent) {
+									tw->widgets[i].widget.t->scroll = tw->widgets[i].widget.t->cursor_y - tw->font.xftfont->ascent;
+								}
+							}
+							call_users_function(tw,tw->widgets[i].widget.t->on_content_changed);
+							draw_text_field(tw,*tw->widgets[i].widget.t);
+						}
+					}
+				}
+			} else if(e.type == ClientMessage) {
+				if(e.xclient.data.l[0] == stop_atom) goto goodbye;
 			}
-		} else if(e.type == ClientMessage) {
-			if(e.xclient.data.l[0] == stop_atom) break;
 		}
 	}
+	goodbye:
 	XDestroyWindow(tw->c.disp, tw->c.win);
 	XCloseDisplay(tw->c.disp);
 	toolkit_running--;
@@ -578,6 +643,7 @@ toolkit_init(int w, int h, char* name) {
 void
 toolkit_show_button(TWindow* tw, Button* b)
 {
+	fprintf(stderr, "adding a widget\n");
 	b->pressed = 0;
 	tw->widgets = realloc(tw->widgets, (++tw->widget_count)*sizeof(_toolkit_widget));
 	tw->widgets[tw->widget_count-1] = (_toolkit_widget) {
@@ -592,6 +658,7 @@ toolkit_show_button(TWindow* tw, Button* b)
 void
 toolkit_show_label(TWindow* tw, Label* l)
 {
+	fprintf(stderr, "adding a widget\n");
 	tw->widgets = realloc(tw->widgets, (++tw->widget_count)*sizeof(_toolkit_widget));
 	tw->widgets[tw->widget_count-1] = (_toolkit_widget) {
 		.type = LABEL,
@@ -604,6 +671,7 @@ toolkit_show_label(TWindow* tw, Label* l)
 void
 toolkit_show_text_field(TWindow* tw, TextField* b)
 {
+	fprintf(stderr, "adding a widget\n");
 	b->selected = 0;
 	b->scroll = 0;
 	b->cursor_position = 0;
@@ -624,6 +692,7 @@ toolkit_show_text_field(TWindow* tw, TextField* b)
 void
 toolkit_show_combo_box(TWindow* tw, ComboBox* c)
 {
+	fprintf(stderr, "adding a widget\n");
 	c->open = 0;
 	c->selected_option = 0;
 	tw->widgets = realloc(tw->widgets, (++tw->widget_count)*sizeof(_toolkit_widget));

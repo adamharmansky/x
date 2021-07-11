@@ -1,4 +1,5 @@
 #include "draw.h"
+#include <stdio.h>
 
 draw_context
 draw_init(int w, int h, char* name, long event_mask) {
@@ -19,14 +20,12 @@ draw_init(int w, int h, char* name, long event_mask) {
 	/* screen */
 	c.scr = DefaultScreen(c.disp);
 	/* window */
-	c.win = XCreateSimpleWindow(c.disp, RootWindow(c.disp, c.scr), 10, 10, w, h, 1, WhitePixel(c.disp, c.scr), BlackPixel(c.disp, c.scr));
+	c.win = XCreateSimpleWindow(c.disp, RootWindow(c.disp, c.scr), 10, 10, w, h, 0, WhitePixel(c.disp, c.scr), BlackPixel(c.disp, c.scr));
 	/* create a drawable to draw into ( We won't be drawing directly into our window) */
 	c.drawable = XCreatePixmap(c.disp, c.win, w, h, DefaultDepth(c.disp, c.scr));
 
 	/* select input from the specified event mask */
 	XSelectInput(c.disp, c.win, event_mask);
-	/* finally, map the window */
-	XMapWindow(c.disp, c.win);
 
 	/* more drawing intialization */
 	c.gc = XCreateGC(c.disp, c.win, 0, NULL);
@@ -35,6 +34,9 @@ draw_init(int w, int h, char* name, long event_mask) {
 	/* window properties */
 	XStoreName(c.disp, c.win, name);
 	// XSetWMNormalHints(c.disp, c.win, &hint);
+
+	/* finally, map the window */
+	XMapWindow(c.disp, c.win);
 	return c;
 }
 
@@ -136,8 +138,10 @@ draw_flush(draw_context c, int x, int y, int w, int h)
 void
 draw_resize(draw_context* c, int w, int h)
 {
+	Pixmap new = XCreatePixmap(c->disp, c->win, w, h, DefaultDepth(c->disp, c->scr));
+	XCopyArea(c->disp, c->drawable, new, c->gc, 0, 0, c->w, c->h, 0,0);
 	XFreePixmap(c->disp, c->drawable);
-	c->drawable = XCreatePixmap(c->disp, c->win, w, h, DefaultDepth(c->disp, c->scr));
+	c->drawable = new;
 	c->w = w;
 	c->h = h;
 	XftDrawChange(c->draw, c->drawable);
