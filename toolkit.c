@@ -138,6 +138,15 @@ draw_button(TWindow* tw,Button b)
 }
 
 static void
+draw_progress_bar(TWindow* tw, ProgressBar p)
+{
+	draw_rectangle(tw->c, p.x-1,p.y-1,p.w+2,p.h+2,tw->outline);
+	draw_rectangle(tw->c, p.x,p.y,p.w,p.h,tw->text_field_bg);
+	draw_rectangle(tw->c, p.x,p.y,(float)p.w*p.progress,p.h,tw->selected_bg);
+	draw_flush(tw->c, p.x-1,p.y-1,p.w+2,p.h+2);
+}
+
+static void
 draw_label(TWindow* tw,Label l)
 {
 	int x = 3, y = tw->font.xftfont->ascent;
@@ -306,14 +315,23 @@ draw_combo_box(TWindow* tw,ComboBox comb)
 }
 
 static void
+draw_icon(TWindow* tw, Icon i)
+{
+	draw_image(tw->c, i.x, i.y, i.image);
+	draw_flush(tw->c, i.x, i.y, i.w,i.h);
+}
+
+static void
 redraw_widgets(TWindow* tw)
 {
 	int i;
 
-	for(i = 0; i < tw->widget_count; i++) {
-		if     (tw->widgets[i].type == BUTTON    ) draw_button    (tw, *tw->widgets[i].widget.b);
-		else if(tw->widgets[i].type == TEXT_FIELD) draw_text_field(tw, *tw->widgets[i].widget.t);
-		else if(tw->widgets[i].type == LABEL)      draw_label     (tw, *tw->widgets[i].widget.l);
+	for(i = 0; i < tw->widget_count; i++) {                       
+		if     (tw->widgets[i].type == BUTTON    )  draw_button          (tw, *tw->widgets[i].widget.b);
+		else if(tw->widgets[i].type == TEXT_FIELD)  draw_text_field      (tw, *tw->widgets[i].widget.t);
+		else if(tw->widgets[i].type == LABEL)       draw_label           (tw, *tw->widgets[i].widget.l);
+		else if(tw->widgets[i].type == PROGRESS_BAR)draw_progress_bar    (tw, *tw->widgets[i].widget.p);
+		else if(tw->widgets[i].type == ICON        )draw_icon            (tw, *tw->widgets[i].widget.i);
 	}
 	/* draw combo boxes on top of fixed-size tw->widgets */
 	for(i = 0; i < tw->widget_count; i++) {
@@ -324,7 +342,6 @@ redraw_widgets(TWindow* tw)
 static void
 full_redraw(TWindow* tw)
 {
-	fprintf(stderr, "redrawing\n");
 	draw_rectangle(tw->c,0,0,tw->c.w,tw->c.h,tw->bg);
 
 	redraw_widgets(tw);
@@ -364,6 +381,8 @@ recalculate_size(TWindow* tw)
 static void*
 _toolkit_thread_func(void* args)
 {
+	TWindow* tw = _i_am_too_lazy_to_do_arguments_right;
+	pthread_mutex_lock(&tw->mut);
 	XEvent e;
 	int i, j;
 	char s[64];
@@ -373,10 +392,8 @@ _toolkit_thread_func(void* args)
 	int grasp = 0;
 	TextField* grasped_window;
 	ComboBox* open_combo_box = NULL;
-	TWindow* tw = _i_am_too_lazy_to_do_arguments_right;
 	struct pollfd fds;
 
-	fprintf(stderr, "entered main thread\n");
 	tw->c = draw_init(tw->default_width, tw->default_height, tw->default_name,
 		ExposureMask |
 		PointerMotionMask |
@@ -407,23 +424,24 @@ _toolkit_thread_func(void* args)
 	tw->widgets = malloc(tw->widget_count=0);
 
 	toolkit_running++;
-	tw->ready = 1;
-	fprintf(stderr, "main thread ready\n");
+	pthread_mutex_unlock(&tw->mut);
 
 	for(;;) {
-		if(!poll(&fds,1,100)) {
+		if(!poll(&fds,1,5)) {
 			if(tw->has_to_redraw) {
+				pthread_mutex_lock(&tw->mut);
 				full_redraw(tw);
 				XFlush(tw->c.disp);
 				tw->has_to_redraw =0;
+				pthread_mutex_unlock(&tw->mut);
 			}
 			continue;
 		}
 		while(XPending(tw->c.disp)) {
 			XNextEvent(tw->c.disp, &e);
+			pthread_mutex_lock(&tw->mut);
 			if(e.type == ConfigureNotify) {
 				if(!e.xconfigure.send_event) {
-					fprintf(stderr, "resizing\n");
 					draw_flush_all(tw->c);
 					draw_resize(&tw->c,draw_width(tw->c), draw_height(tw->c));
 					recalculate_size(tw);
@@ -616,9 +634,11 @@ _toolkit_thread_func(void* args)
 			} else if(e.type == ClientMessage) {
 				if(e.xclient.data.l[0] == stop_atom) goto goodbye;
 			}
+			pthread_mutex_unlock(&tw->mut);
 		}
 	}
 	goodbye:
+	pthread_mutex_unlock(&tw->mut);
 	XDestroyWindow(tw->c.disp, tw->c.win);
 	XCloseDisplay(tw->c.disp);
 	toolkit_running--;
@@ -626,16 +646,17 @@ _toolkit_thread_func(void* args)
 
 /* starts a separate thread for all the widget logic */
 TWindow*
-toolkit_init(int w, int h, char* name) {
+toolkit_init(int w, int h, char* name)
+{
 	TWindow* tw = malloc(sizeof(TWindow));
+	tw->mut = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
 	_i_am_too_lazy_to_do_arguments_right = tw;
-	tw->ready = 0;
 	tw->default_width = w;
 	tw->default_height = h;
 	tw->default_name = name;
 	pthread_create(&tw->thread, NULL, _toolkit_thread_func, NULL);
-	while(!tw->ready) usleep(50000); 
-	usleep(50000);
+	/* wait until the thread locks the mutex (i'm sorry) */
+	usleep(1000);
 	return tw;
 }
 
@@ -643,7 +664,7 @@ toolkit_init(int w, int h, char* name) {
 void
 toolkit_show_button(TWindow* tw, Button* b)
 {
-	fprintf(stderr, "adding a widget\n");
+	pthread_mutex_lock(&tw->mut);
 	b->pressed = 0;
 	tw->widgets = realloc(tw->widgets, (++tw->widget_count)*sizeof(_toolkit_widget));
 	tw->widgets[tw->widget_count-1] = (_toolkit_widget) {
@@ -651,27 +672,27 @@ toolkit_show_button(TWindow* tw, Button* b)
 		.widget.b = b
 	};
 	tw->widgets[tw->widget_count-1].widget.b->_text_length = draw_string_width(tw->c,tw->font, b->text);
-	recalculate_size(tw);
-	redraw_widgets(tw);
+	toolkit_redraw(tw);
+	pthread_mutex_unlock(&tw->mut);
 }
 
 void
 toolkit_show_label(TWindow* tw, Label* l)
 {
-	fprintf(stderr, "adding a widget\n");
+	pthread_mutex_lock(&tw->mut);
 	tw->widgets = realloc(tw->widgets, (++tw->widget_count)*sizeof(_toolkit_widget));
 	tw->widgets[tw->widget_count-1] = (_toolkit_widget) {
 		.type = LABEL,
 		.widget.l = l
 	};
-	recalculate_size(tw);
-	redraw_widgets(tw);
+	toolkit_redraw(tw);
+	pthread_mutex_unlock(&tw->mut);
 }
 
 void
 toolkit_show_text_field(TWindow* tw, TextField* b)
 {
-	fprintf(stderr, "adding a widget\n");
+	pthread_mutex_lock(&tw->mut);
 	b->selected = 0;
 	b->scroll = 0;
 	b->cursor_position = 0;
@@ -685,14 +706,14 @@ toolkit_show_text_field(TWindow* tw, TextField* b)
 		*b->typed_text = 0;
 	}
 	refresh_text_field(tw,b);
-	recalculate_size(tw);
-	redraw_widgets(tw);
+	toolkit_redraw(tw);
+	pthread_mutex_unlock(&tw->mut);
 }
 
 void
 toolkit_show_combo_box(TWindow* tw, ComboBox* c)
 {
-	fprintf(stderr, "adding a widget\n");
+	pthread_mutex_lock(&tw->mut);
 	c->open = 0;
 	c->selected_option = 0;
 	tw->widgets = realloc(tw->widgets, (++tw->widget_count)*sizeof(_toolkit_widget));
@@ -700,21 +721,57 @@ toolkit_show_combo_box(TWindow* tw, ComboBox* c)
 		.type = COMBO_BOX,
 		.widget.c = c
 	};
-	recalculate_size(tw);
-	redraw_widgets(tw);
+	toolkit_redraw(tw);
+	pthread_mutex_unlock(&tw->mut);
+}
+
+void
+toolkit_show_progress_bar(TWindow* tw, ProgressBar* p)
+{
+	pthread_mutex_lock(&tw->mut);
+	tw->widgets = realloc(tw->widgets, (++tw->widget_count)*sizeof(_toolkit_widget));
+	tw->widgets[tw->widget_count-1] = (_toolkit_widget) {
+		.type = PROGRESS_BAR,
+		.widget.p = p
+	};
+	toolkit_redraw(tw);
+	pthread_mutex_unlock(&tw->mut);
+}
+
+void
+toolkit_show_icon(TWindow* tw, Icon* i)
+{
+	pthread_mutex_lock(&tw->mut);
+	tw->widgets = realloc(tw->widgets, (++tw->widget_count)*sizeof(_toolkit_widget));
+	tw->widgets[tw->widget_count-1] = (_toolkit_widget) {
+		.type = ICON,
+		.widget.i = i
+	};
+	i->image = create_image(tw->c, tw->bg, i->source);
+	i->w = i->image.width;
+	i->h = i->image.height;
+	toolkit_redraw(tw);
+	pthread_mutex_unlock(&tw->mut);
 }
 
 int
 toolkit_remove_widget(TWindow* tw, void* widget)
 {
 	int i;
+
+	pthread_mutex_lock(&tw->mut);
 	for(i = 0; i < tw->widget_count; i++) {
 		if(tw->widgets[i].widget.a == widget) {
+			if(tw->widgets[i].type == ICON) {
+				free_image(tw->widgets[i].widget.i->image);
+			}
 			memmove(&tw->widgets[i], &tw->widgets[i+1], (--tw->widget_count-i)*sizeof(_toolkit_widget));
 			toolkit_redraw(tw);
+			pthread_mutex_unlock(&tw->mut);
 			return 0;
 		}
 	}
+	pthread_mutex_unlock(&tw->mut);
 	return 1;
 }
 
@@ -726,4 +783,13 @@ void
 toolkit_redraw(TWindow* tw)
 {
 	tw->has_to_redraw = 1;
+}
+
+void
+update_progress_bar(TWindow* tw, ProgressBar* p, float x)
+{
+	pthread_mutex_lock(&tw->mut);
+	p->progress = x;
+	toolkit_redraw(tw);
+	pthread_mutex_unlock(&tw->mut);
 }

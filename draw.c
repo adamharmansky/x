@@ -1,16 +1,17 @@
 #include "draw.h"
+#include <arpa/inet.h>
 #include <stdio.h>
 
 draw_context
 draw_init(int w, int h, char* name, long event_mask) {
 	draw_context c;
-	// XSizeHints hint = {
-	// 	.flags = PMinSize|PMaxSize,
-	// 	.min_width = w,
-	// 	.min_height = h,
-	// 	.max_width = w,
-	// 	.max_height = h
-	// };
+	XSizeHints hint = {
+		.flags = PMinSize|PMaxSize,
+		.min_width = w,
+		.min_height = h,
+		.max_width = w,
+		.max_height = h
+	};
 
 	c.w = w;
 	c.h = h;
@@ -21,6 +22,10 @@ draw_init(int w, int h, char* name, long event_mask) {
 	c.scr = DefaultScreen(c.disp);
 	/* window */
 	c.win = XCreateSimpleWindow(c.disp, RootWindow(c.disp, c.scr), 10, 10, w, h, 0, WhitePixel(c.disp, c.scr), BlackPixel(c.disp, c.scr));
+	if(*name == '?') {
+		XSetWMNormalHints(c.disp, c.win, &hint);
+		name++;
+	}
 	/* create a drawable to draw into ( We won't be drawing directly into our window) */
 	c.drawable = XCreatePixmap(c.disp, c.win, w, h, DefaultDepth(c.disp, c.scr));
 
@@ -145,4 +150,79 @@ draw_resize(draw_context* c, int w, int h)
 	c->w = w;
 	c->h = h;
 	XftDrawChange(c->draw, c->drawable);
+}
+
+image_t
+create_image(draw_context c, color_t bg, char* filename)
+{
+	static char verif[] = "farbfeld";
+	uint32_t w, h, rowsize;
+	uint64_t i, j;
+	FILE* f = fopen(filename, "r");
+	uint64_t size;
+	image_t img;
+	uint8_t* buf;
+	uint8_t r,g,b,a;
+	XColor bg_xcol;
+	uint8_t bg_r, bg_g, bg_b;
+
+	bg_xcol.pixel = bg.xftcolor.pixel;
+	XQueryColor(c.disp, DefaultColormap(c.disp, c.scr), &bg_xcol);
+	bg_r = bg_xcol.red  >>8;
+	bg_g = bg_xcol.green>>8;
+	bg_b = bg_xcol.blue >>8;
+
+	if(DefaultDepth(c.disp, c.scr) != 24) {
+		printf("only 24-bit screens are supported for images\n");
+		exit(1);
+	}
+
+	/* read the farbfeld header */
+	for(i = 0; i < 8; i++) {
+		if(fgetc(f) != verif[i]) {
+			printf("we only support farbfeld, sorry (maybe try png2ff of something)\n");
+			exit(1);
+		}
+	}
+	fread(&w, 1, 4, f);
+	fread(&h, 1, 4, f);
+	w = ntohl(w);
+	h = ntohl(h);
+	img.width = w;
+	img.height = h;
+
+	img.image = XCreateImage(c.disp, CopyFromParent, 24, ZPixmap, 0, NULL, w, h, 32, 0);
+	rowsize = img.image->bytes_per_line;
+	buf = malloc(rowsize*h);
+	img.data = buf;
+	img.image->data = buf;
+	XInitImage(img.image);
+
+	/* image contents */
+	for(i = 0; i < h; i++) {
+		for(j = 0; j < w; j++) {
+			r =            fgetc(f); fgetc(f);
+			g =            fgetc(f); fgetc(f);
+			b =            fgetc(f); fgetc(f);
+			a =            fgetc(f); fgetc(f);
+			buf[i*rowsize+j*4+3] = a;
+			buf[i*rowsize+j*4+2] = ((r*a)>>8) + ((bg_r*(0xff-a))>>8);
+			buf[i*rowsize+j*4+1] = ((g*a)>>8) + ((bg_g*(0xff-a))>>8);
+			buf[i*rowsize+j*4  ] = ((b*a)>>8) + ((bg_b*(0xff-a))>>8);
+		}
+	}
+	return img;
+}
+
+void
+free_image(image_t img)
+{
+	free(img.data);
+	XDestroyImage(img.image);
+}
+
+void
+draw_image(draw_context c, int x, int y, image_t img)
+{
+	XPutImage(c.disp, c.drawable, c.gc, img.image, 0, 0, x, y, img.width, img.height);
 }

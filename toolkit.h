@@ -40,6 +40,46 @@ typedef struct {
 	int x, y;
 	int w, h;
 
+	char* source;
+	image_t image;
+} Icon;
+
+typedef struct {
+	/* the linear coefficient is multiplied by the width of the window
+	 * and added to the absolute coefficient */
+	struct {
+		struct { int   x,y; } abs;
+		struct { float x,y; } lin;
+	} position;
+	struct {
+		struct { int   w,h; } abs;
+		struct { float w,h; } lin;
+	} size;
+
+	/* DO NOT USE, these are recalculated when the windows recieves an Expose event: */
+	int x, y;
+	int w, h;
+
+	/* update progress through the update_progress_bar function */
+	float progress;
+} ProgressBar;
+
+typedef struct {
+	/* the linear coefficient is multiplied by the width of the window
+	 * and added to the absolute coefficient */
+	struct {
+		struct { int   x,y; } abs;
+		struct { float x,y; } lin;
+	} position;
+	struct {
+		struct { int   w,h; } abs;
+		struct { float w,h; } lin;
+	} size;
+
+	/* DO NOT USE, these are recalculated when the windows recieves an Expose event: */
+	int x, y;
+	int w, h;
+
 	char* text;
 	int _text_length;
 } Label;
@@ -129,6 +169,8 @@ typedef struct {
 		TEXT_FIELD,
 		COMBO_BOX,
 		LABEL,
+		PROGRESS_BAR,
+		ICON
 	} type;
 	union {
 		AnyWidget* a;
@@ -136,6 +178,8 @@ typedef struct {
 		TextField* t;
 		ComboBox* c;
 		Label* l;
+		ProgressBar* p;
+		Icon* i;
 	} widget;
 } _toolkit_widget;
 
@@ -145,9 +189,9 @@ typedef struct {
 	int default_width, default_height;
 	char* default_name;
 	pthread_t thread;
+	pthread_mutex_t mut;
 	draw_context c;
 	int pointer_x, pointer_y, pointer_down;
-	char ready;
 	char has_to_redraw;
 	font_t font;
 	color_t bg;
@@ -174,10 +218,16 @@ toolkit_show_text_field(TWindow*,TextField*);
 extern void
 toolkit_show_combo_box(TWindow*,ComboBox* c);
 extern void
+toolkit_show_progress_bar(TWindow*,ProgressBar* p);
+extern void
+toolkit_show_icon(TWindow* tw, Icon* i);
+extern void
 toolkit_full_redraw(TWindow*);
 extern void
 toolkit_redraw(TWindow*);
 extern int
 toolkit_remove_widget(TWindow*,void*);
+extern void
+update_progress_bar(TWindow*, ProgressBar*, float);
 
 #endif
